@@ -1,3 +1,6 @@
 [submodule "interpolate_unstructured"]
 	path = interpolate_unstructured
 	url = git@github.com:jannisteunissen/interpolate_unstructured.git
+[submodule "particle_core"]
+	path = particle_core
+	url = git@github.com:MD-CWI/particle_core.git
