@@ -1,5 +1,8 @@
 module m_photoi
   use m_random
+  use m_config
+  use m_units_constants
+  use m_gas
 
   implicit none
   private
@@ -12,26 +15,29 @@ module m_photoi
   logical, public :: photoi_enabled = .true.
 
   ! Public methods
+  public :: photoi_create_cfg
   public :: photoi_initialize
   public :: photoi_from_events
 
 contains
 
-  subroutine photoi_initialize(cfg)
-    use m_gas
-    use m_units_constants
-    use m_config
+  subroutine photoi_create_cfg(cfg)
     type(CFG_t), intent(inout) :: cfg
-    real(dp)                   :: frac_O2, temp_vec(2)
 
-    ! Photoionization parameters
-    call CFG_add_get(cfg, "photoi%enabled", photoi_enabled, &
+    call CFG_add(cfg, "photoi%enabled", .true., &
          "Whether photoionization is used")
     call CFG_add(cfg, "photoi%absorp_inv_lengths", &
          [3.5D0 / UC_torr_to_bar, 200D0 / UC_torr_to_bar], &
          "The inverse min/max absorption length, will be scaled by pO2")
     call CFG_add(cfg, "photoi%efficiency", 0.075_dp, &
          "Photoionization efficiency factor (instead of table)")
+  end subroutine photoi_create_cfg
+
+  subroutine photoi_initialize(cfg)
+    type(CFG_t), intent(inout) :: cfg
+    real(dp)                   :: frac_O2, temp_vec(2)
+
+    call CFG_get(cfg, "photoi%enabled", photoi_enabled)
 
     if (photoi_enabled) then
        frac_O2 = GAS_get_fraction("O2")

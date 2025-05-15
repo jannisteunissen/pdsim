@@ -19,10 +19,12 @@ module m_pdsim
   integer, parameter :: pdsim_coord_3d = 2
   integer, parameter :: pdsim_coord_axi = 3
 
+  real(dp), parameter :: material_threshold = 1e-8_dp
+
   type pdsim_t
-     integer  :: n_runs
-     real(dp) :: electrons_initial_rmin(3)
-     real(dp) :: electrons_initial_rmax(3)
+     integer  :: n_initial_positions
+     real(dp) :: initial_rmin(3)
+     real(dp) :: initial_rmax(3)
 
      real(dp) :: max_dt
      real(dp) :: num_electrons_inception
@@ -35,10 +37,10 @@ module m_pdsim
      type(PC_t) :: pc
   end type pdsim_t
 
-  type(iu_grid_t) :: ug
+  type(iu_grid_t) :: pdsim_ug
   integer         :: i_pdata_field(3)
   integer         :: i_cdata_material
-  real(dp)        :: pdsim_gas_material_value
+  integer         :: pdsim_gas_material_value
   integer         :: pdsim_coord_system
   integer         :: pdsim_ndim
   logical         :: pdsim_axisymmetric
@@ -47,10 +49,13 @@ module m_pdsim
   public :: dp
   public :: pdsim_t
 
+  ! Public data
+  public :: pdsim_ug
+
   ! Public methods
   public :: pdsim_create_config
   public :: pdsim_initialize
-  public :: pdsim_create_initial_electron
+  public :: pdsim_get_gas_cells
   public :: pdsim_write_particles
   public :: pdsim_handle_events
 
@@ -66,6 +71,8 @@ contains
          "Whether the mesh is axisymmetric (only for 2D)")
     call CFG_add(cfg, "input%coordinate_scale_factor", 1.0_dp, &
          "Scale factor for coordinates")
+    call CFG_add(cfg, "input%field_scale_factor", 1.0_dp, &
+         "Scale the electric field with this factor")
     call CFG_add(cfg, "input%field_component_names", [undefined_str], &
          "Names of the electric field components stored as point data", &
          dynamic_size=.true., required=.true.)
@@ -73,20 +80,10 @@ contains
          "Variable describing the material (point or cell data), or NONE", &
          required=.true.)
     call CFG_add(cfg, "input%gas_material_value", 0, &
-         "Value of the material variable in the gas phase", required=.true.)
-    call CFG_add(cfg, "input%coordinate_system", undefined_str, &
-         "The type of coordinate system to use (axi, 2d, 3d)", required=.true.)
-    call CFG_add(cfg, "input%field_scale_factor", 1.0_dp, &
-         "Scale the electric field with this factor")
+         "Value of the material variable in the gas phase")
     call CFG_add(cfg, "input%lookup_table_size", 1000, &
          "Size to use for cross section lookup table")
 
-    call CFG_add(cfg, "electrons%initial_rmin", &
-         [undefined_real, undefined_real, undefined_real], &
-         "Min. coordinate for generating initial electrons")
-    call CFG_add(cfg, "electrons%initial_rmax", &
-         [undefined_real, undefined_real, undefined_real], &
-         "Max. coordinate for generating initial electrons")
     call CFG_add(cfg, "electrons%max_eV", 500.0_dp, &
          "Max. electron energy (eV)")
 
@@ -107,12 +104,20 @@ contains
     call CFG_add(cfg, "output%particles_dt", 1e-9_dp, &
          "Output time step for particles (s)")
 
-    call CFG_add(cfg, "simulation%max_dt", 1.0e-11_dp, &
+    call CFG_add(cfg, "simulation%max_dt", 1.0e-12_dp, &
          "Maximal time step (s)")
-    call CFG_add(cfg, "simulation%n_runs", 1, &
-         "Number of runs to do, each starting with a single electron")
-    call CFG_add(cfg, "simulation%num_electrons_inception", 1e6_dp, &
+    call CFG_add(cfg, "simulation%n_initial_positions", 1, &
+         "Number of initial electron positions to consider")
+    call CFG_add(cfg, "simulation%num_electrons_inception", 1e5_dp, &
          "Assume inception takes place when there are this many electrons")
+    call CFG_add(cfg, "simulation%initial_rmin", &
+         [undefined_real, undefined_real, undefined_real], &
+         "Min. coordinate for generating initial electrons")
+    call CFG_add(cfg, "simulation%initial_rmax", &
+         [undefined_real, undefined_real, undefined_real], &
+         "Max. coordinate for generating initial electrons")
+
+    call photoi_create_cfg(cfg)
 
   end subroutine pdsim_create_config
 
@@ -125,7 +130,7 @@ contains
 
     ! Mesh related parameters
     character(len=200) :: mesh_file
-    real(dp)           :: scale_factor
+    real(dp)           :: r_scale_factor, E_scale_factor
     character(len=80)  :: material_name
     character(len=80), allocatable :: field_component_names(:)
     integer            :: n_field_comp
@@ -143,35 +148,18 @@ contains
     integer :: lookup_table_size
 
     call CFG_get(cfg, "input%mesh", mesh_file)
-    call CFG_get(cfg, "input%coordinate_scale_factor", scale_factor)
+    call CFG_get(cfg, "input%coordinate_scale_factor", r_scale_factor)
 
-    call iu_read_grid(trim(mesh_file), ug, scale_factor)
+    call iu_read_grid(trim(mesh_file), pdsim_ug, r_scale_factor)
+    pdsim_ndim = iu_ndim_cell_type(pdsim_ug%cell_type)
 
+    call CFG_get(cfg, "input%gas_material_value", pdsim_gas_material_value)
     call CFG_get(cfg, "input%material_name", material_name)
 
-    call store_material_as_cell_data(ug, trim(material_name), &
+    call store_material_as_cell_data(pdsim_ug, trim(material_name), &
             i_cdata_material)
 
     call CFG_get_size(cfg, "input%field_component_names", n_field_comp)
-    allocate(field_component_names(n_field_comp))
-    call CFG_get(cfg, "input%field_component_names", field_component_names)
-
-    do n = 1, n_field_comp
-       call iu_get_point_data_index(ug, trim(field_component_names(n)), &
-            i_pdata_field(n))
-       if (i_pdata_field(n) == -1) then
-          write(error_unit, *) trim(field_component_names(n)) // " not found"
-          write(error_unit, *) "Available are:"
-          do i = 1, ug%n_point_data
-             write(error_unit, *) i, trim(ug%point_data_names(i))
-          end do
-          error stop "invalid input%field_component_names"
-       end if
-    end do
-
-    call CFG_get(cfg, "input%axisymmetric", pdsim_axisymmetric)
-
-    pdsim_ndim = iu_ndim_cell_type(ug%cell_type)
 
     if (pdsim_ndim /= n_field_comp) then
        write(error_unit, *) "Number of electric field components: ", &
@@ -179,6 +167,30 @@ contains
        write(error_unit, *) "Problems dimension: ", pdsim_ndim
        error stop "Number of E-components must match dimension"
     end if
+
+    allocate(field_component_names(n_field_comp))
+    call CFG_get(cfg, "input%field_component_names", field_component_names)
+
+    do n = 1, n_field_comp
+       call iu_get_point_data_index(pdsim_ug, trim(field_component_names(n)), &
+            i_pdata_field(n))
+       if (i_pdata_field(n) == -1) then
+          write(error_unit, *) trim(field_component_names(n)) // " not found"
+          write(error_unit, *) "Available are:"
+          do i = 1, pdsim_ug%n_point_data
+             write(error_unit, *) i, trim(pdsim_ug%point_data_names(i))
+          end do
+          error stop "invalid input%field_component_names"
+       end if
+    end do
+
+    call CFG_get(cfg, "input%field_scale_factor", E_scale_factor)
+    if (abs(E_scale_factor - 1.0_dp) > 0) then
+       pdsim_ug%point_data(:, i_pdata_field(1:n_field_comp)) = E_scale_factor * &
+             pdsim_ug%point_data(:, i_pdata_field(1:n_field_comp))
+    end if
+
+    call CFG_get(cfg, "input%axisymmetric", pdsim_axisymmetric)
 
     if (pdsim_ndim == 2) then
        if (pdsim_axisymmetric) then
@@ -211,13 +223,13 @@ contains
             gas_fracs(n) * GAS_number_dens, 0.0_dp, cross_secs)
     end do
 
-    call CFG_get(cfg, "electrons%initial_rmin", pd%electrons_initial_rmin)
-    call CFG_get(cfg, "electrons%initial_rmax", pd%electrons_initial_rmax)
+    call CFG_get(cfg, "simulation%initial_rmin", pd%initial_rmin)
+    call CFG_get(cfg, "simulation%initial_rmax", pd%initial_rmax)
 
-    if (all(pd%electrons_initial_rmin <= undefined_real)) &
-         pd%electrons_initial_rmin = ug%rmin
-    if (all(pd%electrons_initial_rmax <= undefined_real)) &
-         pd%electrons_initial_rmax = ug%rmax
+    if (all(pd%initial_rmin <= undefined_real)) &
+         pd%initial_rmin = pdsim_ug%rmin
+    if (all(pd%initial_rmax <= undefined_real)) &
+         pd%initial_rmax = pdsim_ug%rmax
 
     call CFG_get(cfg, "electrons%max_eV", max_eV)
 
@@ -225,7 +237,7 @@ contains
     call CFG_get(cfg, "simulation%num_electrons_inception", &
          pd%num_electrons_inception)
     call CFG_get(cfg, "simulation%max_dt", pd%max_dt)
-    call CFG_get(cfg, "simulation%n_runs", pd%n_runs)
+    call CFG_get(cfg, "simulation%n_initial_positions", pd%n_initial_positions)
 
     call CFG_get(cfg, "output%name", pd%output_name)
     call check_path_writable(trim(pd%output_name))
@@ -245,7 +257,7 @@ contains
     pd%pc%accel_function => accel_function
     pd%pc%outside_check => outside_check
 
-    call pd%pc%initialize(UC_elec_mass, 2*ceiling(pd%num_electrons_inception))
+    call pd%pc%initialize(UC_elec_mass, 100*int(pd%num_electrons_inception))
     call pd%pc%use_cross_secs(max_eV, lookup_table_size, cross_secs)
 
     where (pd%pc%colls(:)%type == CS_ionize_t .or. &
@@ -292,39 +304,58 @@ contains
     print *, "Wrote ", trim(fname)
   end subroutine pdsim_write_particles
 
-  !> Create a single electron somewhere in the gas part of the domain
-  subroutine pdsim_create_initial_electron(pd)
-    type(pdsim_t), intent(inout) :: pd
-    real(dp)                     :: x0(3), material
-    integer, parameter           :: max_attempts = 1000
-    integer                      :: n, i_cell
-    type(PC_part_t)              :: my_part
+  !> Construct index array of approximately n_max cells that are in the gas
+  subroutine pdsim_get_gas_cells(ug, n_max, rmin, rmax, i_cell_gas)
+    type(iu_grid_t)                     :: ug
+    integer, intent(in)                 :: n_max
+    real(dp), intent(in)                :: rmin(3)
+    real(dp), intent(in)                :: rmax(3)
+    integer, allocatable, intent(inout) :: i_cell_gas(:)
+    logical, allocatable                :: mask(:)
+    real(dp), allocatable               :: unif_01(:)
+    integer, allocatable                :: indices(:)
+    integer                             :: n, i, n_gas_cells
+    real(dp)                            :: center(3)
 
-    do n = 1, max_attempts
-       call random_number(x0)
-       x0 = pd%electrons_initial_rmin + x0 * (pd%electrons_initial_rmax - &
-            pd%electrons_initial_rmin)
+    if (i_cdata_material > 0) then
+       mask = abs(ug%cell_data(:, i_cdata_material) - &
+            pdsim_gas_material_value) < material_threshold
+    else
+       allocate(mask(ug%n_cells))
+       mask(:) = .true.
+    end if
 
-       if (i_cdata_material > 0) then
-          i_cell = 0
-          call iu_get_cell_scalar_at(ug, x0, i_cdata_material, &
-               i_cell, material)
-          if (i_cell <= 0) cycle
-          if (abs(material - pdsim_gas_material_value) > 1e-8_dp) cycle
+    do n = 1, ug%n_cells
+       center = iu_get_cell_center(ug, n)
+       if (any(center < rmin) .or. any(center > rmax)) then
+          mask(n) = .false.
        end if
-
-       my_part%x(:)   = x0
-       my_part%v(:)   = 0.0_dp
-       my_part%w      = 1.0_dp
-       my_part%t_left = 0.0_dp
-       my_part%a(:)   = 0.0_dp ! Will be set aftewards
-       call pd%pc%add_part(my_part)
-       exit
     end do
 
-    if (n == max_attempts + 1) error stop "No initial electron position found"
+    n_gas_cells = count(mask)
+    allocate(i_cell_gas(n_gas_cells))
 
-  end subroutine pdsim_create_initial_electron
+    i = 0
+    do n = 1, ug%n_cells
+       if (mask(n)) then
+          i = i + 1
+          i_cell_gas(i) = n
+       end if
+    end do
+
+    if (n_gas_cells > n_max) then
+       ! Randomly sub-sample
+       allocate(unif_01(n_max))
+       call random_number(unif_01)
+
+       ! unif_01 are in the range [0, 1)
+       indices = 1 + floor(unif_01 * n_gas_cells)
+       i_cell_gas = i_cell_gas(indices)
+    else if (n_gas_cells == 0) then
+       error stop "No valid initial cells"
+    end if
+
+  end subroutine pdsim_get_gas_cells
 
   !> Check whether a particle is outside the gas
   integer function outside_check(my_part)
@@ -348,7 +379,7 @@ contains
 
        i_cell = 0
        material = -1e100_dp
-       call iu_get_cell_scalar_at(ug, x, i_cdata_material, &
+       call iu_get_cell_scalar_at(pdsim_ug, x, i_cdata_material, &
             i_cell, material)
 
        if (abs(material - pdsim_gas_material_value) > 1e-8_dp) then
@@ -376,10 +407,11 @@ contains
        x = my_part%x
     end select
 
-    call iu_interpolate_at(ug, x, 2, i_pdata_field(1:2), a(1:2), my_part%id)
+    call iu_interpolate_at(pdsim_ug, x, pdsim_ndim, &
+         i_pdata_field(1:pdsim_ndim), a(1:pdsim_ndim), my_part%id)
     a = a * UC_elec_q_over_m
 
-    if (my_part%id < 1) error stop "accel_function_2d: interpolation error"
+    if (my_part%id < 1) error stop "accel_function: interpolation error"
   end function accel_function
 
   !> Convert particle coordinates to (r, z)
@@ -393,8 +425,9 @@ contains
 
   !> After updating the particles, events such as ionization are stored. Here
   !> we compute photoionization based on these events.
-  subroutine pdsim_handle_events(pc)
+  subroutine pdsim_handle_events(pc, n_ionizations)
     type(PC_t), intent(inout) :: pc
+    integer, intent(inout)    :: n_ionizations
 
     integer                     :: n, n_photons
     real(dp), allocatable, save :: coords(:, :)
@@ -415,6 +448,9 @@ contains
        allocate(coords(3, n))
        allocate(weights(n))
     end if
+
+    n_ionizations = n_ionizations + &
+         count(pc%event_list(1:pc%n_events)%ctype == CS_ionize_t)
 
     if (photoi_enabled) then
        call photoi_from_events(pc%n_events, pc%event_list, pc%rng, &
