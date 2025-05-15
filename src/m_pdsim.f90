@@ -147,6 +147,11 @@ contains
     real(dp) :: max_eV
     integer :: lookup_table_size
 
+    call CFG_get(cfg, "output%name", pd%output_name)
+    call check_path_writable(trim(pd%output_name))
+
+    call CFG_write(cfg, trim(pd%output_name) // "_config.cfg")
+
     call CFG_get(cfg, "input%mesh", mesh_file)
     call CFG_get(cfg, "input%coordinate_scale_factor", r_scale_factor)
 
@@ -238,9 +243,6 @@ contains
          pd%num_electrons_inception)
     call CFG_get(cfg, "simulation%max_dt", pd%max_dt)
     call CFG_get(cfg, "simulation%n_initial_positions", pd%n_initial_positions)
-
-    call CFG_get(cfg, "output%name", pd%output_name)
-    call check_path_writable(trim(pd%output_name))
 
     call CFG_get(cfg, "output%log", pd%output_log)
     call CFG_get(cfg, "output%particles", pd%output_particles)
