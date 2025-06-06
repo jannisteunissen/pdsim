@@ -74,6 +74,7 @@ contains
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: rtol, atol, r(3), y(pdsim_ndim+1)
     real(dp)                   :: field(pdsim_ndim), alpha_eta(2)
+    real(dp)                   :: domain_center(3), direction(3)
     logical                    :: reverse
 
     call CFG_get(cfg, "integral%max_steps", max_steps)
@@ -88,22 +89,24 @@ contains
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
     call iu_add_point_data(pdsim_ug, "eta", i_eta)
 
-    !$omp parallel do private(r, y, n_steps, field, alpha_eta)
+    domain_center = 0.5_dp * (pdsim_ug%rmin + pdsim_ug%rmax)
+
+    !$omp parallel do private(r, y, n_steps, field, alpha_eta, direction)
     do n = 1, pdsim_ug%n_points
        r = pdsim_ug%points(:, n)
 
        ! Ensure points are some distance away from boundaries
-       r(1:pdsim_ndim) = max(r(1:pdsim_ndim), &
-            pdsim_ug%rmin(1:pdsim_ndim) + boundary_distance)
-       r(1:pdsim_ndim) = min(r(1:pdsim_ndim), &
-            pdsim_ug%rmax(1:pdsim_ndim) - boundary_distance)
+       if (pdsim_ug%point_is_at_boundary(n)) then
+          direction = (domain_center - r) / norm2(domain_center - r)
+          r = r + boundary_distance * direction
+       end if
 
        call iu_integrate_along_field(pdsim_ug, alpha_eff_func, pdsim_ndim, &
             r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
             min_dx, max_dx, max_steps, rtol, atol, reverse, y, n_steps, &
             pdsim_cdata_material, pdsim_gas_material_value)
 
-       pdsim_ug%point_data(n, i_k_integral) = y(3)
+       pdsim_ug%point_data(n, i_k_integral) = y(pdsim_ndim+1)
 
        ! Store alpha and eta
        field = pdsim_ug%point_data(n, pdsim_pdata_field(1:pdsim_ndim))
