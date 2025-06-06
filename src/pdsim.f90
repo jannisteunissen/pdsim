@@ -106,6 +106,11 @@ contains
             min_dx, max_dx, max_steps, rtol, atol, reverse, y, n_steps, &
             pdsim_cdata_material, pdsim_gas_material_value)
 
+       if (n_steps > max_steps) then
+          print *, "Error for start position", r(1:pdsim_ndim)
+          error stop "Increase integral%max_steps"
+       end if
+
        pdsim_ug%point_data(n, i_k_integral) = y(pdsim_ndim+1)
 
        ! Store alpha and eta
