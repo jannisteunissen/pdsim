@@ -7,6 +7,7 @@ module m_pdsim
   use m_units_constants
   use m_cross_sec
   use m_gas
+  use m_lookup_table
 
   implicit none
   private
@@ -22,7 +23,11 @@ module m_pdsim
   real(dp), parameter :: material_threshold = 1e-8_dp
 
   type pdsim_t
-     integer  :: n_initial_positions
+     logical :: simulate_particles
+     logical :: compute_ionization_integral
+
+     character(len=64) :: start_method
+     integer  :: n_random_positions
      real(dp) :: initial_rmin(3)
      real(dp) :: initial_rmax(3)
 
@@ -35,22 +40,22 @@ module m_pdsim
      real(dp)           :: output_particles_dt
 
      type(PC_t) :: pc
+
+     real(dp), allocatable :: field_alpha_eta(:, :)
+     type(LT_t) :: lkptbl
   end type pdsim_t
 
-  type(iu_grid_t) :: pdsim_ug
-  integer         :: i_pdata_field(3)
-  integer         :: i_cdata_material
-  integer         :: pdsim_gas_material_value
-  integer         :: pdsim_coord_system
-  integer         :: pdsim_ndim
-  logical         :: pdsim_axisymmetric
+  type(iu_grid_t), public    :: pdsim_ug
+  integer, public, protected :: pdsim_pdata_field(3)
+  integer, public, protected :: pdsim_cdata_material
+  integer, public, protected :: pdsim_gas_material_value
+  integer, public, protected :: pdsim_coord_system
+  integer, public, protected :: pdsim_ndim
+  logical, public, protected :: pdsim_axisymmetric
 
   ! Public types
   public :: dp
   public :: pdsim_t
-
-  ! Public data
-  public :: pdsim_ug
 
   ! Public methods
   public :: pdsim_create_config
@@ -64,6 +69,7 @@ contains
   !> Create configuration for pdsim module
   subroutine pdsim_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
+    real(dp) :: dummy_real(0)
 
     call CFG_add(cfg, "input%mesh", undefined_str, &
          "Input mesh file in (.binda format)", required=.true.)
@@ -104,18 +110,43 @@ contains
     call CFG_add(cfg, "output%particles_dt", 1e-9_dp, &
          "Output time step for particles (s)")
 
+    call CFG_add(cfg, "simulation%particles", .true., &
+         "Whether to simulate using particles")
+    call CFG_add(cfg, "simulation%compute_ionization_integral", .true., &
+         "Whether to compute the ionization integral")
+    call CFG_add(cfg, "simulation%alpha_eta_file", undefined_str, &
+         "File with field (V/m), alpha (1/m) and eta (1/m)")
+
     call CFG_add(cfg, "simulation%max_dt", 1.0e-12_dp, &
-         "Maximal time step (s)")
-    call CFG_add(cfg, "simulation%n_initial_positions", 1, &
-         "Number of initial electron positions to consider")
+         "Maximal time step (s) for particles")
+    call CFG_add(cfg, "simulation%initial_positions", dummy_real, &
+         "Given initial electron positions e.g. (x0, y0, ..., xn, yn)", &
+         dynamic_size=.true.)
+    call CFG_add(cfg, "simulation%n_random_positions", -1, &
+         "Number of random initial electron positions to consider")
     call CFG_add(cfg, "simulation%num_electrons_inception", 1e5_dp, &
          "Assume inception takes place when there are this many electrons")
+    call CFG_add(cfg, "simulation%start_method", undefined_str, &
+         "How to set start locations of initial electrons", required=.true.)
     call CFG_add(cfg, "simulation%initial_rmin", &
          [undefined_real, undefined_real, undefined_real], &
          "Min. coordinate for generating initial electrons")
     call CFG_add(cfg, "simulation%initial_rmax", &
          [undefined_real, undefined_real, undefined_real], &
          "Max. coordinate for generating initial electrons")
+
+    call CFG_add(cfg, "integral%max_steps", 1000, &
+         "Maximum number of steps for K integral")
+    call CFG_add(cfg, "integral%rtol", 2e-3_dp, &
+         "Relative tolerance per step for K integral")
+    call CFG_add(cfg, "integral%atol", 1e-4_dp, &
+         "Absolute tolerance per step for K integral")
+    call CFG_add(cfg, "integral%min_dx", 1e-7_dp, &
+         "Minimum step size for K integral")
+    call CFG_add(cfg, "integral%max_dx", 1e-3_dp, &
+         "Maximum step size for K integral")
+    call CFG_add(cfg, "integral%boundary_distance", 1e-5_dp, &
+         "Keep this distance away from rmin and rmax of mesh")
 
     call photoi_create_cfg(cfg)
 
@@ -147,6 +178,10 @@ contains
     real(dp) :: max_eV
     integer :: lookup_table_size
 
+    ! Transport data
+    character(len=200) :: alpha_eta_file
+    integer            :: n_rows
+
     call CFG_get(cfg, "output%name", pd%output_name)
     call check_path_writable(trim(pd%output_name))
 
@@ -160,9 +195,10 @@ contains
 
     call CFG_get(cfg, "input%gas_material_value", pdsim_gas_material_value)
     call CFG_get(cfg, "input%material_name", material_name)
+    call CFG_get(cfg, "input%lookup_table_size", lookup_table_size)
 
     call store_material_as_cell_data(pdsim_ug, trim(material_name), &
-            i_cdata_material)
+            pdsim_cdata_material)
 
     call CFG_get_size(cfg, "input%field_component_names", n_field_comp)
 
@@ -178,8 +214,8 @@ contains
 
     do n = 1, n_field_comp
        call iu_get_point_data_index(pdsim_ug, trim(field_component_names(n)), &
-            i_pdata_field(n))
-       if (i_pdata_field(n) == -1) then
+            pdsim_pdata_field(n))
+       if (pdsim_pdata_field(n) == -1) then
           write(error_unit, *) trim(field_component_names(n)) // " not found"
           write(error_unit, *) "Available are:"
           do i = 1, pdsim_ug%n_point_data
@@ -191,8 +227,8 @@ contains
 
     call CFG_get(cfg, "input%field_scale_factor", E_scale_factor)
     if (abs(E_scale_factor - 1.0_dp) > 0) then
-       pdsim_ug%point_data(:, i_pdata_field(1:n_field_comp)) = E_scale_factor * &
-             pdsim_ug%point_data(:, i_pdata_field(1:n_field_comp))
+       pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp)) = E_scale_factor * &
+             pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp))
     end if
 
     call CFG_get(cfg, "input%axisymmetric", pdsim_axisymmetric)
@@ -228,6 +264,28 @@ contains
             gas_fracs(n) * GAS_number_dens, 0.0_dp, cross_secs)
     end do
 
+    call CFG_get(cfg, "simulation%particles", pd%simulate_particles)
+    call CFG_get(cfg, "simulation%compute_ionization_integral", &
+         pd%compute_ionization_integral)
+    call CFG_get(cfg, "simulation%alpha_eta_file", alpha_eta_file)
+
+    if (pd%compute_ionization_integral) then
+       if (alpha_eta_file == undefined_str) &
+            error stop "simulation%alpha_eta_file is not set"
+
+       call read_table_from_txt(trim(alpha_eta_file), 3, 1000, &
+            pd%field_alpha_eta)
+       n_rows = size(pd%field_alpha_eta, 2)
+
+       pd%lkptbl = LT_create(pd%field_alpha_eta(1, 1), &
+            pd%field_alpha_eta(1, n_rows), lookup_table_size, 2)
+
+       call LT_set_col(pd%lkptbl, 1, pd%field_alpha_eta(1, :), &
+            pd%field_alpha_eta(2, :))
+       call LT_set_col(pd%lkptbl, 2, pd%field_alpha_eta(1, :), &
+            pd%field_alpha_eta(3, :))
+    end if
+
     call CFG_get(cfg, "simulation%initial_rmin", pd%initial_rmin)
     call CFG_get(cfg, "simulation%initial_rmax", pd%initial_rmax)
 
@@ -238,11 +296,11 @@ contains
 
     call CFG_get(cfg, "electrons%max_eV", max_eV)
 
-    call CFG_get(cfg, "input%lookup_table_size", lookup_table_size)
     call CFG_get(cfg, "simulation%num_electrons_inception", &
          pd%num_electrons_inception)
+    call CFG_get(cfg, "simulation%start_method", pd%start_method)
     call CFG_get(cfg, "simulation%max_dt", pd%max_dt)
-    call CFG_get(cfg, "simulation%n_initial_positions", pd%n_initial_positions)
+    call CFG_get(cfg, "simulation%n_random_positions", pd%n_random_positions)
 
     call CFG_get(cfg, "output%log", pd%output_log)
     call CFG_get(cfg, "output%particles", pd%output_particles)
@@ -319,8 +377,8 @@ contains
     integer                             :: n, i, n_gas_cells
     real(dp)                            :: center(3)
 
-    if (i_cdata_material > 0) then
-       mask = abs(ug%cell_data(:, i_cdata_material) - &
+    if (pdsim_cdata_material > 0) then
+       mask = abs(ug%cell_data(:, pdsim_cdata_material) - &
             pdsim_gas_material_value) < material_threshold
     else
        allocate(mask(ug%n_cells))
@@ -367,7 +425,7 @@ contains
 
     outside_check = 0
 
-    if (i_cdata_material > 0) then
+    if (pdsim_cdata_material > 0) then
        select case (pdsim_coord_system)
        case (pdsim_coord_2d)
           x(1:2) = my_part%x(1:2)
@@ -381,7 +439,7 @@ contains
 
        i_cell = 0
        material = -1e100_dp
-       call iu_get_cell_scalar_at(pdsim_ug, x, i_cdata_material, &
+       call iu_get_cell_scalar_at(pdsim_ug, x, pdsim_cdata_material, &
             i_cell, material)
 
        if (abs(material - pdsim_gas_material_value) > 1e-8_dp) then
@@ -410,7 +468,7 @@ contains
     end select
 
     call iu_interpolate_at(pdsim_ug, x, pdsim_ndim, &
-         i_pdata_field(1:pdsim_ndim), a(1:pdsim_ndim), my_part%id)
+         pdsim_pdata_field(1:pdsim_ndim), a(1:pdsim_ndim), my_part%id)
     a = a * UC_elec_q_over_m
 
     if (my_part%id < 1) error stop "accel_function: interpolation error"
@@ -500,8 +558,6 @@ contains
     character(len=*), intent(in)    :: name
     !> Index of cell data variable corresponding to material
     integer, intent(out)            :: i_material
-    real(dp), allocatable           :: old_data(:, :)
-    character(len=128), allocatable :: old_names(:)
     real(dp)                        :: fac
     integer                         :: n
 
@@ -521,16 +577,7 @@ contains
     end if
 
     ! Convert point data to cell data
-    call move_alloc(ug%cell_data, old_data)
-    call move_alloc(ug%cell_data_names, old_names)
-    allocate(ug%cell_data(ug%n_cells, ug%n_cell_data+1))
-    allocate(ug%cell_data_names(ug%n_cell_data+1))
-
-    ug%cell_data(:, 1:ug%n_cell_data) = old_data
-    ug%cell_data_names(1:ug%n_cell_data) = old_names
-
-    ug%n_cell_data = ug%n_cell_data + 1
-    ug%cell_data_names(ug%n_cell_data) = name
+    call iu_add_cell_data(ug, name // "_celldata", i_material)
 
     fac = 1.0_dp/ug%n_points_per_cell
 
@@ -542,5 +589,29 @@ contains
     i_material = ug%n_cell_data
 
   end subroutine store_material_as_cell_data
+
+  !> Routine to read in tabulated data from a text file
+  subroutine read_table_from_txt(file_name, n_columns, max_rows, array)
+    character(len=*), intent(in)       :: file_name
+    integer, intent(in)                :: n_columns
+    integer, intent(in)                :: max_rows
+
+    real(dp), allocatable, intent(out) :: array(:, :)
+    real(dp), allocatable              :: tmp_array(:, :)
+    integer                            :: my_unit, n, io
+
+    allocate(tmp_array(n_columns, max_rows))
+    open(newunit=my_unit, file=trim(file_name), action = "read")
+
+    do n = 1, max_rows
+       read(my_unit, *, iostat=io) tmp_array(:, n)
+       if (io /= 0) exit
+    end do
+
+    close(my_unit)
+
+    allocate(array(n_columns, n-1))
+    array(:, 1:n-1) = tmp_array(:, 1:n-1)
+  end subroutine read_table_from_txt
 
 end module m_pdsim

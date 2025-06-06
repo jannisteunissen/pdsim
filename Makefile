@@ -13,7 +13,7 @@ clean:
 	$(RM) $(progs) src/*.o src/*.mod
 
 # Dependency information
-$(PROGS): src/m_config.o src/m_photoi.o src/m_pdsim.o
+$(PROGS): src/m_config.o src/m_photoi.o src/m_pdsim.o src/m_lookup_table.o
 
 # How to get .o object files from .f90 source files
 src/%.o: src/%.f90
