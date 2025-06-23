@@ -149,7 +149,7 @@ contains
 
     call CFG_add(cfg, "integral%max_steps", 1000, &
          "Maximum number of steps for K integral")
-    call CFG_add(cfg, "integral%rtol", 2e-3_dp, &
+    call CFG_add(cfg, "integral%rtol", 1e-4_dp, &
          "Relative tolerance per step for K integral")
     call CFG_add(cfg, "integral%atol", 1e-4_dp, &
          "Absolute tolerance per step for K integral")

@@ -70,7 +70,8 @@ contains
   subroutine compute_ionization_integral(cfg)
     type(cfg_t), intent(inout) :: cfg
     integer                    :: n, i_k_integral, i_alpha, i_eta
-    integer                    :: i_pgeom, i_x1, i_x2, i_x3, i_time
+    integer                    :: i_pgeom, i_w
+    integer                    :: i_p0, i_x1, i_x2, i_x3, i_time
     integer                    :: max_steps, n_steps, nvar
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: rtol, atol, r(3), w
@@ -91,7 +92,9 @@ contains
     call iu_add_point_data(pdsim_ug, "K_integral", i_k_integral)
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
     call iu_add_point_data(pdsim_ug, "eta", i_eta)
+    call iu_add_point_data(pdsim_ug, "avalanche_p0", i_p0)
     call iu_add_point_data(pdsim_ug, "avalanche_pgeom", i_pgeom)
+    call iu_add_point_data(pdsim_ug, "avalanche_w", i_w)
     call iu_add_point_data(pdsim_ug, "avalanche_time", i_time)
     call iu_add_point_data(pdsim_ug, "avalanche_x1", i_x1)
     call iu_add_point_data(pdsim_ug, "avalanche_x2", i_x2)
@@ -145,9 +148,11 @@ contains
        pdsim_ug%point_data(n, i_eta) = td(pdsim_col_eta)
 
        ! Compute w according to Kendall's 1948 paper
-       call compute_kendall_w(pdsim_ndim, n_steps, y(:, 1:n_steps), &
+       call compute_kendall_w(pdsim_ndim, nvar, n_steps, y(:, 1:n_steps), &
             y_field(:, 1:n_steps), w)
+       pdsim_ug%point_data(n, i_w) = w
        pdsim_ug%point_data(n, i_pgeom) = 1/w
+       pdsim_ug%point_data(n, i_p0) = 1 - exp(y(pdsim_ndim+1, n_steps))/w
     end do
     !$omp end parallel do
 
@@ -172,10 +177,11 @@ contains
   !> paper. This can be written as:
   !> w = 1 + exp(-rho(x)) * integral(exp(rho(x')) * alpha(x') dx')
   !> for x' between 0 and x. Here rho(x) = -K(x).
-  subroutine compute_kendall_w(ndim, n_steps, y, y_field, w)
+  subroutine compute_kendall_w(ndim, nvar, n_steps, y, y_field, w)
     integer, intent(in)   :: ndim
+    integer, intent(in)   :: nvar
     integer, intent(in)   :: n_steps
-    real(dp), intent(in)  :: y(ndim+1, n_steps)
+    real(dp), intent(in)  :: y(ndim+nvar, n_steps)
     real(dp), intent(in)  :: y_field(ndim, n_steps)
     real(dp), intent(out) :: w
 
@@ -254,26 +260,31 @@ contains
        print *, i_start, iteration, n_ionizations(i_start)
     end do
 
-    call write_ionization_count(i_start_cells, n_ionizations)
+    call write_ionization_count(n_pos, r_start, n_ionizations)
 
   end subroutine particle_simulation
 
-  subroutine write_ionization_count(i_start_cells, n_ionizations)
-    integer, intent(in) :: i_start_cells(:)
-    integer, intent(in) :: n_ionizations(:)
+  subroutine write_ionization_count(n_pos, r_start, n_ionizations)
+    integer, intent(in)  :: n_pos
+    real(dp), intent(in) :: r_start(pdsim_ndim, n_pos)
+    integer, intent(in)  :: n_ionizations(n_pos)
 
-    character(len=200)        :: fname
-    integer                   :: my_unit, n
+    character(len=200) :: fname
+    integer            :: my_unit, n
+    real(dp)           :: r(3)
 
     write(fname, "(A,I0.5,A,I0.5,A)") trim(pd%output_name) // &
          "_ionization_count.3D"
 
     open(newunit=my_unit, file=trim(fname), action="write")
     write(my_unit, *) "X Y Z n_ionizations"
-    do n = 1, size(i_start_cells)
-       write(my_unit, *) iu_get_cell_center(pdsim_ug, i_start_cells(n)), &
-            n_ionizations(n)
+
+    r(:) = 0.0_dp
+    do n = 1, n_pos
+       r(1:pdsim_ndim) = r_start(:, n)
+       write(my_unit, *) r, n_ionizations(n)
     end do
+
     close(my_unit)
 
     print *, "Wrote ", trim(fname)

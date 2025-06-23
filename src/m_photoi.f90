@@ -68,35 +68,44 @@ contains
     real(dp), intent(inout)      :: photo_w(:)
     integer, intent(out)         :: n_photons
 
-    integer  :: i, i_cpy, n, m, n_uv
-    real(dp) :: en_frac, fly_len, mean_gammas, x(3)
+    integer  :: i, n
 
-    i = 0
+    n_photons = 0
     do n = 1, n_events
        if (events(n)%ctype == CS_ionize_t) then
-
-          mean_gammas = pi_efficiency * pi_quench_fac * events(n)%part%w
-          n_uv        = rng%poisson(mean_gammas)
-
-          do m = 1, n_uv
-             en_frac = rng%unif_01()
-             fly_len = -log(1.0_dp - rng%unif_01()) / get_photoi_lambda(en_frac)
-             x       = events(n)%part%x + rng%sphere(fly_len)
-
-             !$omp critical
-             i = i + 1
-             i_cpy = i
-             !$omp end critical
-             if (i_cpy > size(photo_w)) error stop "Too many photons were generated"
-             photo_pos(:, i_cpy) = x
-             photo_w(i_cpy)      = 1.0_dp
-          end do
+          call photoi_sample_photons(rng, events(n)%part%x, events(n)%part%w, &
+               i, photo_pos(:, n_photons+1:))
+          n_photons = n_photons + i
        end if
     end do
-
-    n_photons = i
-
   end subroutine photoi_from_events
+
+  subroutine photoi_sample_photons(rng, x_source, num_ionizations, &
+       n_photons, absorption_locations)
+    type(RNG_t), intent(inout) :: rng
+    real(dp), intent(in)       :: x_source(3)
+    real(dp), intent(in)       :: num_ionizations
+    integer, intent(out)       :: n_photons
+    real(dp), intent(inout)    :: absorption_locations(:, :)
+
+    integer  :: n
+    real(dp) :: num_mean, en_frac, fly_len
+
+    num_mean  = pi_efficiency * pi_quench_fac * num_ionizations
+    n_photons = rng%poisson(num_mean)
+
+    if (size(absorption_locations, 1) /= 3) &
+         error stop "absorption_locations should be sized (3, max_photons)"
+    if (n_photons > size(absorption_locations, 2)) &
+         error stop "Too many photons were generated"
+
+    do n = 1, n_photons
+       en_frac = rng%unif_01()
+       fly_len = -log(1.0_dp - rng%unif_01()) / get_photoi_lambda(en_frac)
+       absorption_locations(:, n) = x_source + rng%sphere(fly_len)
+    end do
+
+  end subroutine photoi_sample_photons
 
   ! Returns the inverse mean free path for a photon.
   real(dp) function get_photoi_lambda(en_frac)
