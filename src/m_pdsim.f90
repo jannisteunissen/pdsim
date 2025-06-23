@@ -20,6 +20,18 @@ module m_pdsim
   integer, parameter :: pdsim_coord_3d = 2
   integer, parameter :: pdsim_coord_axi = 3
 
+  !> Number of columns in transport data lookup table
+  integer, parameter, public :: pdsim_ncols = 3
+
+  !> Column in lookup table with ionization coefficient
+  integer, parameter, public :: pdsim_col_alpha = 1
+
+  !> Column in lookup table with attachment coefficient
+  integer, parameter, public :: pdsim_col_eta = 2
+
+  !> Column in lookup table with electron mobility coefficient
+  integer, parameter, public :: pdsim_col_mu = 3
+
   real(dp), parameter :: material_threshold = 1e-8_dp
 
   type pdsim_t
@@ -145,8 +157,8 @@ contains
          "Minimum step size for K integral")
     call CFG_add(cfg, "integral%max_dx", 1e-3_dp, &
          "Maximum step size for K integral")
-    call CFG_add(cfg, "integral%boundary_distance", 1e-5_dp, &
-         "Keep this distance away from rmin and rmax of mesh")
+    call CFG_add(cfg, "integral%boundary_distance", 1e-6_dp, &
+         "Initially, keep this distance away from boundaries")
 
     call photoi_create_cfg(cfg)
 
@@ -273,17 +285,19 @@ contains
        if (alpha_eta_file == undefined_str) &
             error stop "simulation%alpha_eta_file is not set"
 
-       call read_table_from_txt(trim(alpha_eta_file), 3, 1000, &
+       call read_table_from_txt(trim(alpha_eta_file), pdsim_ncols+1, 1000, &
             pd%field_alpha_eta)
        n_rows = size(pd%field_alpha_eta, 2)
 
        pd%lkptbl = LT_create(pd%field_alpha_eta(1, 1), &
-            pd%field_alpha_eta(1, n_rows), lookup_table_size, 2)
+            pd%field_alpha_eta(1, n_rows), lookup_table_size, pdsim_ncols)
 
-       call LT_set_col(pd%lkptbl, 1, pd%field_alpha_eta(1, :), &
+       call LT_set_col(pd%lkptbl, pdsim_col_alpha, pd%field_alpha_eta(1, :), &
             pd%field_alpha_eta(2, :))
-       call LT_set_col(pd%lkptbl, 2, pd%field_alpha_eta(1, :), &
+       call LT_set_col(pd%lkptbl, pdsim_col_eta, pd%field_alpha_eta(1, :), &
             pd%field_alpha_eta(3, :))
+       call LT_set_col(pd%lkptbl, pdsim_col_mu, pd%field_alpha_eta(1, :), &
+            pd%field_alpha_eta(4, :))
     end if
 
     call CFG_get(cfg, "simulation%initial_rmin", pd%initial_rmin)
