@@ -1,5 +1,5 @@
 module m_pdsim
-  use iso_fortran_env, only: error_unit
+  use iso_fortran_env, only: error_unit, int64
   use m_interp_unstructured
   use m_particle_core
   use m_config
@@ -34,6 +34,11 @@ module m_pdsim
 
   real(dp), parameter :: material_threshold = 1e-8_dp
 
+  integer, public :: i_k_integral, i_alpha, i_eta
+  integer, public :: i_w, i_p0, i_x1, i_x2, i_x3, i_travel_time
+  integer, public :: i_inception_time
+  integer, public :: i_inception_prob
+
   type pdsim_t
      logical :: simulate_particles
      logical :: compute_ionization_integral
@@ -57,6 +62,14 @@ module m_pdsim
      type(LT_t) :: lkptbl
   end type pdsim_t
 
+  type avalanche_t
+     real(dp)       :: t_source
+     real(dp)       :: t_arrival
+     real(dp)       :: r_arrival(3)
+     real(dp)       :: r_source(3)
+     integer(int64) :: avalanche_size
+  end type avalanche_t
+
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
   integer, public, protected :: pdsim_cdata_material
@@ -68,6 +81,7 @@ module m_pdsim
   ! Public types
   public :: dp
   public :: pdsim_t
+  public :: avalanche_t
 
   ! Public methods
   public :: pdsim_create_config
@@ -75,6 +89,7 @@ module m_pdsim
   public :: pdsim_get_gas_cells
   public :: pdsim_write_particles
   public :: pdsim_handle_events
+  public :: pdsim_convert_r
 
 contains
 
@@ -159,6 +174,15 @@ contains
          "Maximum step size for K integral")
     call CFG_add(cfg, "integral%boundary_distance", 1e-6_dp, &
          "Initially, keep this distance away from boundaries")
+
+    call CFG_add(cfg, "avalanche%max_total_number", 1000*1000, &
+         "Maximum total number of avalanches per run")
+    call CFG_add(cfg, "avalanche%n_runs", 10, &
+         "Number of runs per initial avalanche location")
+    call CFG_add(cfg, "avalanche%max_photons", 10*1000, &
+         "Maximum number of photons produced by a single avalanche")
+    call CFG_add(cfg, "avalanche%inception_threshold", 1000, &
+         "Discharge inception when there are this many future avalanches")
 
     call photoi_create_cfg(cfg)
 
@@ -440,16 +464,7 @@ contains
     outside_check = 0
 
     if (pdsim_cdata_material > 0) then
-       select case (pdsim_coord_system)
-       case (pdsim_coord_2d)
-          x(1:2) = my_part%x(1:2)
-          x(3) = 0.0_dp
-       case (pdsim_coord_axi)
-          x(1:2) = x_to_rz(my_part%x)
-          x(3) = 0.0_dp
-       case (pdsim_coord_3d)
-          x = my_part%x
-       end select
+       x = pdsim_convert_r(my_part%x)
 
        i_cell = 0
        material = -1e100_dp
@@ -468,18 +483,8 @@ contains
     type(PC_part_t), intent(inout) :: my_part
     real(dp)                       :: a(3), x(3)
 
-    select case (pdsim_coord_system)
-    case (pdsim_coord_2d)
-       x(1:2) = my_part%x(1:2)
-       x(3) = 0.0_dp
-       a(3) = 0.0_dp
-    case (pdsim_coord_axi)
-       x(1:2) = x_to_rz(my_part%x)
-       x(3) = 0.0_dp
-       a(3) = 0.0_dp
-    case (pdsim_coord_3d)
-       x = my_part%x
-    end select
+    x = pdsim_convert_r(my_part%x)
+    a(pdsim_ndim+1:) = 0.0_dp
 
     call iu_interpolate_at(pdsim_ug, x, pdsim_ndim, &
          pdsim_pdata_field(1:pdsim_ndim), a(1:pdsim_ndim), my_part%id)
@@ -496,6 +501,23 @@ contains
     rz(1) = sqrt(x(1)**2 + x(3)**2) ! radius
     rz(2) = x(2)                    ! z
   end function x_to_rz
+
+  !> Convert 3D coordinate xyz to used actual coordinate system
+  pure function pdsim_convert_r(xyz) result(r)
+    real(dp), intent(in) :: xyz(3)
+    real(dp)             :: r(3)
+
+    select case (pdsim_coord_system)
+    case (pdsim_coord_2d)
+       r(1:2) = xyz(1:2)
+       r(3) = 0.0_dp
+    case (pdsim_coord_axi)
+       r(1:2) = x_to_rz(xyz)
+       r(3) = 0.0_dp
+    case (pdsim_coord_3d)
+       r = xyz
+    end select
+  end function pdsim_convert_r
 
   !> After updating the particles, events such as ionization are stored. Here
   !> we compute photoionization based on these events.

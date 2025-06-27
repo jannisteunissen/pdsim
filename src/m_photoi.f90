@@ -18,6 +18,7 @@ module m_photoi
   public :: photoi_create_cfg
   public :: photoi_initialize
   public :: photoi_from_events
+  public :: photoi_sample_photons
 
 contains
 
@@ -39,21 +40,20 @@ contains
 
     call CFG_get(cfg, "photoi%enabled", photoi_enabled)
 
-    if (photoi_enabled) then
-       frac_O2 = GAS_get_fraction("O2")
-       if (frac_O2 <= epsilon(1.0_dp)) then
-          error stop "There is no oxygen, you should disable photoionzation"
-       end if
-
-       call CFG_get(cfg, "photoi%absorp_inv_lengths", temp_vec)
-       pi_min_inv_abs_len = temp_vec(1) * frac_O2 * GAS_pressure
-       pi_max_inv_abs_len = temp_vec(2) * frac_O2 * GAS_pressure
-
-       call CFG_get(cfg, "photoi%efficiency", pi_efficiency)
-
-       pi_quench_fac = (30.0D0 * UC_torr_to_bar) / &
-            (GAS_pressure + (30.0D0 * UC_torr_to_bar))
+    frac_O2 = GAS_get_fraction("O2")
+    if (frac_O2 <= epsilon(1.0_dp)) then
+       error stop "There is no oxygen, you should disable photoionzation"
     end if
+
+    call CFG_get(cfg, "photoi%absorp_inv_lengths", temp_vec)
+    pi_min_inv_abs_len = temp_vec(1) * frac_O2 * GAS_pressure
+    pi_max_inv_abs_len = temp_vec(2) * frac_O2 * GAS_pressure
+
+    call CFG_get(cfg, "photoi%efficiency", pi_efficiency)
+
+    pi_quench_fac = (30.0D0 * UC_torr_to_bar) / &
+         (GAS_pressure + (30.0D0 * UC_torr_to_bar))
+
   end subroutine photoi_initialize
 
   subroutine photoi_from_events(n_events, events, rng, photo_pos, photo_w, n_photons)

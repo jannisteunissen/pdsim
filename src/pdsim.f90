@@ -8,6 +8,7 @@ program simulate_inception
   use m_photoi
   use m_lookup_table
   use m_interp_unstructured
+  use m_pq
 
   implicit none
 
@@ -29,6 +30,8 @@ program simulate_inception
   if (pd%compute_ionization_integral) then
      call compute_ionization_integral(cfg)
   end if
+
+  call simulate_avalanches(cfg)
 
   select case (pd%start_method)
   case ("random_cell")
@@ -69,9 +72,7 @@ contains
 
   subroutine compute_ionization_integral(cfg)
     type(cfg_t), intent(inout) :: cfg
-    integer                    :: n, i_k_integral, i_alpha, i_eta
-    integer                    :: i_pgeom, i_w
-    integer                    :: i_p0, i_x1, i_x2, i_x3, i_time
+    integer                    :: n
     integer                    :: max_steps, n_steps, nvar
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: rtol, atol, r(3), w
@@ -93,15 +94,11 @@ contains
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
     call iu_add_point_data(pdsim_ug, "eta", i_eta)
     call iu_add_point_data(pdsim_ug, "avalanche_p0", i_p0)
-    call iu_add_point_data(pdsim_ug, "avalanche_pgeom", i_pgeom)
     call iu_add_point_data(pdsim_ug, "avalanche_w", i_w)
-    call iu_add_point_data(pdsim_ug, "avalanche_time", i_time)
+    call iu_add_point_data(pdsim_ug, "avalanche_time", i_travel_time)
     call iu_add_point_data(pdsim_ug, "avalanche_x1", i_x1)
     call iu_add_point_data(pdsim_ug, "avalanche_x2", i_x2)
-
-    if (pdsim_ndim == 3) then
-       call iu_add_point_data(pdsim_ug, "avalanche_x3", i_x3)
-    end if
+    call iu_add_point_data(pdsim_ug, "avalanche_x3", i_x3)
 
     domain_center = 0.5_dp * (pdsim_ug%rmin + pdsim_ug%rmax)
 
@@ -132,13 +129,15 @@ contains
        end if
 
        pdsim_ug%point_data(n, i_k_integral) = y(pdsim_ndim+1, n_steps)
-       pdsim_ug%point_data(n, i_time) = y(pdsim_ndim+2, n_steps)
+       pdsim_ug%point_data(n, i_travel_time) = y(pdsim_ndim+2, n_steps)
 
        ! Store final position
        pdsim_ug%point_data(n, i_x1) = y(1, n_steps)
        pdsim_ug%point_data(n, i_x2) = y(2, n_steps)
        if (pdsim_ndim == 3) then
           pdsim_ug%point_data(n, i_x3) = y(3, n_steps)
+       else
+          pdsim_ug%point_data(n, i_x3) = 0.0_dp
        end if
 
        ! Store alpha and eta
@@ -151,7 +150,6 @@ contains
        call compute_kendall_w(pdsim_ndim, nvar, n_steps, y(:, 1:n_steps), &
             y_field(:, 1:n_steps), w)
        pdsim_ug%point_data(n, i_w) = w
-       pdsim_ug%point_data(n, i_pgeom) = 1/w
        pdsim_ug%point_data(n, i_p0) = 1 - exp(y(pdsim_ndim+1, n_steps))/w
     end do
     !$omp end parallel do
@@ -205,6 +203,166 @@ contains
 
     w = 1 + exp(y(ndim+1, n_steps)) * w
   end subroutine compute_kendall_w
+
+  !> Simulate avalanches as discrete events
+  subroutine simulate_avalanches(cfg)
+    use m_random
+    type(cfg_t), intent(inout) :: cfg
+
+    integer                        :: n, ix, k, i_run, i_avalanche
+    integer                        :: max_avalanches, n_runs
+    integer                        :: max_photons
+    integer                        :: inception_threshold
+    integer                        :: n_photons, i_cell
+    integer, parameter             :: n_vars = 6
+    integer                        :: i_vars(n_vars)
+    real(dp)                       :: r(3), w, k_integral, travel_time
+    real(dp)                       :: time, r_arrival(3)
+    real(dp)                       :: vars(n_vars)
+    type(avalanche_t), allocatable :: avalanches(:)
+    real(dp), allocatable          :: absorption_locations(:, :)
+    real(dp), allocatable          :: inception_time(:)
+    logical, allocatable           :: inception(:)
+    type(pqr_t)                    :: pq
+    type(rng_t)                    :: rng
+
+    i_vars = [i_w, i_k_integral, i_travel_time, i_x1, i_x2, i_x3]
+
+    call iu_add_point_data(pdsim_ug, "inception_time", i_inception_time)
+    call iu_add_point_data(pdsim_ug, "inception_prob", i_inception_prob)
+
+    call CFG_get(cfg, "avalanche%max_total_number", max_avalanches)
+    call CFG_get(cfg, "avalanche%max_photons", max_photons)
+    call CFG_get(cfg, "avalanche%n_runs", n_runs)
+    call CFG_get(cfg, "avalanche%inception_threshold", inception_threshold)
+
+    allocate(avalanches(max_avalanches))
+    allocate(absorption_locations(3, max_photons))
+    allocate(inception(n_runs))
+    allocate(inception_time(n_runs))
+
+    ! Create priority queue that will store upcoming avalanches, sorted by
+    ! their arrival time
+    call pqr_create(pq)
+
+    call rng%set_random_seed()
+
+    do n = 1, pdsim_ug%n_points
+       if (modulo(n, pdsim_ug%n_points/100) == 0) then
+          write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
+       end if
+
+       do i_run = 1, n_runs
+          i_avalanche = 0
+          time = 0.0_dp
+          pq%n_stored = 0
+
+          ! Parameters for the initial avalanche
+          r = pdsim_ug%points(:, n)
+          w = pdsim_ug%point_data(n, i_w)
+          k_integral = pdsim_ug%point_data(n, i_k_integral)
+          travel_time = pdsim_ug%point_data(n, i_travel_time)
+          r_arrival = pdsim_ug%point_data(n, [i_x1, i_x2, i_x3])
+
+          call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
+               r_arrival, i_avalanche, avalanches, pq)
+
+          time_loop: do while (pq%n_stored > 0)
+             ! Get the next avalanche
+             call pqr_pop(pq, ix, time)
+
+             associate (av => avalanches(ix))
+               ! Produce photons
+               call photoi_sample_photons(rng, av%r_source, &
+                    real(av%avalanche_size, dp), n_photons, absorption_locations)
+
+               do k = 1, n_photons
+                  i_cell = 0
+                  r = pdsim_convert_r(absorption_locations(:, k))
+                  call iu_get_cell(pdsim_ug, r, i_cell)
+
+                  if (i_cell > 0) then
+                     ! Photoelectron can contribute to new avalanche
+                     call iu_interpolate_at(pdsim_ug, r, n_vars, &
+                          i_vars, vars, i_cell)
+
+                     w = vars(1)
+                     k_integral = vars(2)
+                     travel_time = vars(3)
+                     r_arrival = vars(4:6)
+
+                     call add_new_avalanche(rng, time, r, w, k_integral, &
+                          travel_time, r_arrival, i_avalanche, avalanches, pq)
+
+                     ! Exit when the inception threshold has been reached
+                     if (pq%n_stored == inception_threshold) exit time_loop
+                  end if
+               end do
+             end associate
+          end do time_loop
+
+          inception(i_run) = (pq%n_stored >= inception_threshold)
+          inception_time(i_run) = time
+       end do
+
+       pdsim_ug%point_data(n, i_inception_time) = &
+            sum(inception_time, mask=inception)/max(1, count(inception))
+       pdsim_ug%point_data(n, i_inception_prob) = count(inception) / real(n_runs, dp)
+    end do
+
+  end subroutine simulate_avalanches
+
+  subroutine add_new_avalanche(rng, time, r, w, k_integral, &
+       dt, r_arrival, ix, avalanches, pq)
+    use m_random
+    use iso_fortran_env, only: int64
+    type(rng_t), intent(inout)       :: rng
+    real(dp), intent(in)             :: time
+    real(dp), intent(in)             :: r(3)
+    real(dp), intent(in)             :: w
+    real(dp), intent(in)             :: k_integral
+    real(dp), intent(in)             :: dt
+    real(dp), intent(in)             :: r_arrival(3)
+    integer, intent(inout)           :: ix
+    type(avalanche_t), intent(inout) :: avalanches(:)
+    type(pqr_t), intent(inout)       :: pq
+
+    real(dp) :: p0, pgeom, tmp
+
+    ! Probability of the avalanche having size zero
+    p0 = 1 - exp(k_integral)/w
+
+    if (rng%unif_01() > p0) then
+       ! Add avalanche
+       ix = ix + 1
+
+       if (ix > size(avalanches)) &
+            error stop "Not enough storage for avalanches"
+
+       ! Probability of geometric distribution
+       pgeom = 1/w
+
+       associate (av => avalanches(ix))
+         av%t_source = time
+         av%r_source = r
+         av%r_arrival = r_arrival
+         av%t_arrival = time + dt
+
+         ! Sample avalanche size. Take care of cases when pgeom >= 1.0 due to
+         ! numerical errors
+         if (pgeom < 1) then
+            tmp = log(1 - rng%unif_01()) / log(1 - pgeom)
+         else
+            tmp = 0.0_dp
+         end if
+
+         av%avalanche_size = ceiling(tmp, int64)
+
+         call pqr_push(pq, ix, av%t_arrival)
+       end associate
+    end if
+
+  end subroutine add_new_avalanche
 
   subroutine particle_simulation(n_pos, r_start, n_ionizations)
     integer, intent(in)  :: n_pos
