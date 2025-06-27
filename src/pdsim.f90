@@ -219,6 +219,7 @@ contains
     real(dp)                       :: r(3), w, k_integral, travel_time
     real(dp)                       :: time, r_arrival(3)
     real(dp)                       :: vars(n_vars)
+    real(dp)                       :: p_avg, volume
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp), allocatable          :: absorption_locations(:, :)
     real(dp), allocatable          :: inception_time(:)
@@ -310,8 +311,15 @@ contains
        pdsim_ug%point_data(n, i_inception_prob) = count(inception) / real(n_runs, dp)
     end do
 
+    call compute_pointdata_average(pdsim_ug, i_inception_prob, &
+         pdsim_axisymmetric, p_avg, volume)
+
+    write(*, "(A,E11.3)") " Average inception probability: ", p_avg
+    write(*, "(A,E12.4)") " Total volume of gas: ", volume
+
   end subroutine simulate_avalanches
 
+  !> Add a new avalanche to the list of avalanches, if it has a nonzero size
   subroutine add_new_avalanche(rng, time, r, w, k_integral, &
        dt, r_arrival, ix, avalanches, pq)
     use m_random
@@ -363,6 +371,55 @@ contains
     end if
 
   end subroutine add_new_avalanche
+
+  !> Compute volume average of a variable defined at points (vertices)
+  subroutine compute_pointdata_average(ug, iv, axisymmetric, avg, vol)
+    type(iu_grid_t), intent(in) :: ug
+    integer, intent(in)         :: iv !< Index of point data variable
+    logical, intent(in)         :: axisymmetric
+    real(dp), intent(out)       :: avg !< Average of the variable
+    real(dp), intent(out)       :: vol !< Total volume
+    integer                     :: n, k, i_point
+    real(dp)                    :: dV, total_sum, w
+    real(dp)                    :: center(3)
+    real(dp), parameter         :: pi = acos(-1.0_dp)
+    logical, allocatable        :: mask(:)
+
+    if (axisymmetric .and. iu_ndim_cell_type(ug%cell_type) /= 2) &
+         error stop "Axisymmetric should only be used in 2D"
+
+    allocate(mask(ug%n_cells))
+    mask(:) = (nint(ug%cell_data(:, pdsim_cdata_material)) == &
+         pdsim_gas_material_value)
+
+    ! Weight per point. An improvement could be to have a variable weight in
+    ! axisymmetric cases.
+    w = 1.0_dp / ug%n_points_per_cell
+
+    vol = 0.0_dp
+    total_sum = 0.0_dp
+
+    do n = 1, ug%n_cells
+       if (mask(n)) then
+          if (axisymmetric) then
+             ! Multiply with 2 * pi * r, where r is at the cell center
+             center = iu_get_cell_center(ug, n)
+             dV = ug%cell_volume(n) * 2 * pi * center(1)
+          else
+             dV = ug%cell_volume(n)
+          end if
+
+          vol = vol + dV
+          do k = 1, ug%n_points_per_cell
+             i_point = ug%cells(k, n)
+             total_sum = total_sum + dV * w * ug%point_data(i_point, iv)
+          end do
+       end if
+    end do
+
+    avg = total_sum / vol
+
+  end subroutine compute_pointdata_average
 
   subroutine particle_simulation(n_pos, r_start, n_ionizations)
     integer, intent(in)  :: n_pos
