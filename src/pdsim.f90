@@ -35,7 +35,7 @@ program pdsim
      case ("integral")
         print *, "Computing ionization integrals"
         call integral_compute(cfg)
-     case ("avalanche")
+     case ("avalanches")
         print *, "Computing ionization integrals"
         call integral_compute(cfg)
         print *, "Starting avalanche simulation"
@@ -44,7 +44,7 @@ program pdsim
         print *, "Starting particle simulation"
         call particles_simulate(cfg)
      case default
-        error stop "simulate option can be integral, avalanche, particles"
+        error stop "simulate option can be integral, avalanches, particles"
   end select
 
   call iu_write_vtk(pdsim_ug, trim(pdsim_output_name) // ".vtu")

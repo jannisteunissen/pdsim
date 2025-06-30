@@ -107,33 +107,36 @@ contains
              call pqr_pop(pq, ix, time)
 
              associate (av => avalanches(ix))
-               ! Produce photons
-               call photoi_sample_photons(rng, av%r_source, &
-                    real(av%avalanche_size, dp), n_photons, absorption_locations)
+               if (photoi_enabled) then
+                  ! Produce photons
+                  call photoi_sample_photons(rng, av%r_source, &
+                       real(av%avalanche_size, dp), n_photons, absorption_locations)
 
-               do k = 1, n_photons
-                  i_cell = 0
-                  r = pdsim_convert_r(absorption_locations(:, k))
-                  call iu_get_cell(pdsim_ug, r, i_cell)
+                  do k = 1, n_photons
+                     i_cell = 0
+                     r = pdsim_convert_r(absorption_locations(:, k))
+                     call iu_get_cell(pdsim_ug, r, i_cell)
 
-                  if (i_cell > 0) then
-                     ! Photoelectron can contribute to new avalanche
-                     call iu_interpolate_at(pdsim_ug, r, n_vars, &
-                          i_vars, vars, i_cell)
+                     if (i_cell > 0) then
+                        ! Photoelectron can contribute to new avalanche
+                        call iu_interpolate_at(pdsim_ug, r, n_vars, &
+                             i_vars, vars, i_cell)
 
-                     w = vars(1)
-                     k_integral = vars(2)
-                     travel_time = vars(3)
-                     r_arrival = vars(4:6)
+                        w = vars(1)
+                        k_integral = vars(2)
+                        travel_time = vars(3)
+                        r_arrival = vars(4:6)
 
-                     call add_new_avalanche(rng, time, r, w, k_integral, &
-                          travel_time, r_arrival, i_avalanche, avalanches, pq)
+                        call add_new_avalanche(rng, time, r, w, k_integral, &
+                             travel_time, r_arrival, i_avalanche, avalanches, pq)
 
-                     ! Exit when the inception threshold has been reached
-                     if (pq%n_stored == inception_threshold) exit time_loop
-                  end if
-               end do
+                        ! Exit when the inception threshold has been reached
+                        if (pq%n_stored == inception_threshold) exit time_loop
+                     end if
+                  end do
+               end if
              end associate
+
           end do time_loop
 
           inception(i_run) = (pq%n_stored >= inception_threshold)
