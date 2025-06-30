@@ -56,7 +56,7 @@ contains
 
   end subroutine photoi_initialize
 
-  subroutine photoi_from_events(n_events, events, rng, photo_pos, photo_w, n_photons)
+  subroutine photoi_from_events(n_events, events, rng, photo_pos, n_photons)
     use m_cross_sec
     use m_particle_core
     use m_units_constants
@@ -65,7 +65,6 @@ contains
     type(PC_event_t), intent(in) :: events(n_events) !< list of events
     type(RNG_t), intent(inout)   :: rng
     real(dp), intent(inout)      :: photo_pos(:, :)
-    real(dp), intent(inout)      :: photo_w(:)
     integer, intent(out)         :: n_photons
 
     integer  :: i, n
