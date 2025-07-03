@@ -108,8 +108,9 @@ contains
 
              associate (av => avalanches(ix))
                if (photoi_enabled) then
-                  ! Produce photons
-                  call photoi_sample_photons(rng, av%r_source, &
+                  ! Photons are assumed to all originate from the end position
+                  ! of the avalanche
+                  call photoi_sample_photons(rng, av%r_arrival, &
                        real(av%avalanche_size, dp), n_photons, absorption_locations)
 
                   do k = 1, n_photons
