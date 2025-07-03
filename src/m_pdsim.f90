@@ -33,7 +33,11 @@ module m_pdsim
   real(dp), parameter :: material_threshold = 1e-8_dp
 
   integer, public :: i_k_integral, i_alpha, i_eta
-  integer, public :: i_w, i_p0, i_x1, i_x2, i_x3, i_travel_time
+  integer, public :: i_w, i_p0
+  integer, public :: i_x1, i_x2, i_x3
+  integer, public :: i_ion_x1, i_ion_x2, i_ion_x3
+  integer, public :: i_avalanche_time
+  integer, public :: i_ion_time
   integer, public :: i_inception_time
   integer, public :: i_inception_prob
 
@@ -41,6 +45,12 @@ module m_pdsim
 
   !> Size for lookup tables used for interpolation
   integer, public, protected :: pdsim_table_size
+
+  !> Positive ion mobility (m^2/Vs)
+  real(dp), public, protected :: pdsim_ion_mobility
+
+  !> Secondary emission coefficient for ions reaching a boundary
+  real(dp), public, protected :: pdsim_ion_gamma_boundary
 
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
@@ -84,6 +94,10 @@ contains
          "Size to use for cross section lookup table")
     call CFG_add(cfg, "input%alpha_eta_file", undefined_str, &
          "File with field (V/m), alpha (1/m), eta (1/m), mu (m^2/Vs)")
+    call CFG_add(cfg, "input%ion_mobility", 2e-4_dp, &
+         "Positive ion mobility (m^2/Vs)")
+    call CFG_add(cfg, "input%ion_gamma_boundary", 0.0_dp, &
+         "Secondary emission coefficient for ions reaching a boundary")
 
     call CFG_add(cfg, "gas%temperature", 300.0_dp, "Gas temperature (K)")
     call CFG_add(cfg, "gas%pressure", 1.0_dp, "Gas pressure (bar)")
@@ -183,6 +197,9 @@ contains
     else
        pdsim_coord_system = pdsim_coord_3d
     end if
+
+    call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
+    call CFG_get(cfg, "input%ion_gamma_boundary", pdsim_ion_gamma_boundary)
 
     call CFG_get_size(cfg, "gas%components", n_gas_comp)
     call CFG_get_size(cfg, "gas%fractions", n_gas_frac)
