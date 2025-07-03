@@ -223,8 +223,12 @@ contains
        ! Add avalanche
        ix = ix + 1
 
-       if (ix > size(avalanches)) &
-            error stop "Not enough storage for avalanches"
+       if (ix > size(avalanches)) then
+          print *, "Avalanche index: ", ix
+          print *, "Simulation time: ", time
+          print *, "Number of active avalanches: ", pq%n_stored
+          error stop "Not enough storage for avalanches"
+       end if
 
        ! Probability of geometric distribution
        pgeom = 1/w
