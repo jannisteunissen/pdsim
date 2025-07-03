@@ -95,10 +95,9 @@ contains
 
     if (size(absorption_locations, 1) /= 3) &
          error stop "absorption_locations should be sized (3, max_photons)"
-    if (n_photons > size(absorption_locations, 2)) &
-         error stop "Too many photons were generated"
 
-    do n = 1, n_photons
+    ! If there are too many photons, do not store all of them
+    do n = 1, min(n_photons, size(absorption_locations, 2))
        en_frac = rng%unif_01()
        fly_len = -log(1.0_dp - rng%unif_01()) / get_photoi_lambda(en_frac)
        absorption_locations(:, n) = x_source + rng%sphere(fly_len)

@@ -19,9 +19,9 @@ contains
 
     call CFG_add(cfg, "integral%max_steps", 1000, &
          "Maximum number of steps for K integral")
-    call CFG_add(cfg, "integral%rtol", 1e-4_dp, &
+    call CFG_add(cfg, "integral%rtol", 1e-5_dp, &
          "Relative tolerance per step for K integral")
-    call CFG_add(cfg, "integral%atol", 1e-4_dp, &
+    call CFG_add(cfg, "integral%atol", 1e-5_dp, &
          "Absolute tolerance per step for K integral")
     call CFG_add(cfg, "integral%min_dx", 1e-7_dp, &
          "Minimum step size for K integral")
@@ -38,9 +38,9 @@ contains
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: rtol, atol, r(3), w
     real(dp)                   :: field(pdsim_ndim), td(pdsim_ncols)
-    real(dp)                   :: domain_center(3), direction(3)
     real(dp)                   :: r_final(3)
     real(dp), allocatable      :: y(:, :), y_field(:, :)
+    real(dp), allocatable      :: moved_points(:, :)
     logical                    :: reverse
     integer, parameter         :: nvar = 2
 
@@ -66,21 +66,17 @@ contains
     call iu_add_point_data(pdsim_ug, "ion_x2", i_ion_x2)
     call iu_add_point_data(pdsim_ug, "ion_x3", i_ion_x3)
 
-    domain_center = 0.5_dp * (pdsim_ug%rmin + pdsim_ug%rmax)
+    ! Move mesh points slightly away from domain boundaries
+    call move_mesh_points_from_boundary(pdsim_ug, boundary_distance, &
+         moved_points)
 
     allocate(y(pdsim_ndim+nvar, max_steps))
     allocate(y_field(pdsim_ndim, max_steps))
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
-    !$omp w, direction, reverse, r_final)
+    !$omp w, reverse, r_final)
     do n = 1, pdsim_ug%n_points
-       r = pdsim_ug%points(:, n)
-
-       ! Ensure points are some distance away from boundaries
-       if (pdsim_ug%point_is_at_boundary(n)) then
-          direction = (domain_center - r) / norm2(domain_center - r)
-          r = r + boundary_distance * direction
-       end if
+       r = moved_points(:, n)
 
        ! Trace electron avalanche
        reverse = .true.
@@ -140,6 +136,43 @@ contains
     !$omp end parallel do
 
   end subroutine integral_compute
+
+  !> Move mesh points slightly away from domain boundaries
+  subroutine move_mesh_points_from_boundary(ug, distance, points)
+    type(iu_grid_t), intent(in)          :: ug
+    real(dp), intent(in)                 :: distance
+    real(dp), allocatable, intent(inout) :: points(:, :)
+
+    integer              :: n, k, i_point
+    real(dp)             :: center(3), direction(3)
+    logical, allocatable :: moved(:)
+
+    allocate(points(3, ug%n_points))
+    allocate(moved(ug%n_points))
+
+    points = ug%points
+    moved = .false.
+
+    do n = 1, ug%n_cells
+       ! For cells in the gas, move boundary points inwards
+       if (abs(ug%cell_data(n, pdsim_cdata_material) - &
+            pdsim_gas_material_value) <= 0) then
+          do k = 1, ug%n_points_per_cell
+             i_point = ug%cells(k, n)
+
+             ! Move points only once
+             if (ug%point_is_at_boundary(i_point) .and. &
+                  .not. moved(i_point)) then
+                center = iu_get_cell_center(ug, n)
+                direction = center - points(:, i_point)
+                points(:, i_point) = points(:, i_point) + distance * &
+                     direction / norm2(direction)
+                moved(i_point) = .true.
+             end if
+          end do
+       end if
+    end do
+  end subroutine move_mesh_points_from_boundary
 
   !> Computes alpha effective and 1/velocity for electrons
   subroutine electron_sub(ndim, r, field, nvar, integrand)

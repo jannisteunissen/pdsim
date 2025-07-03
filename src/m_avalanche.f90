@@ -38,10 +38,12 @@ contains
          "Maximum total number of avalanches per run")
     call CFG_add(cfg, "avalanche%n_runs", 10, &
          "Number of runs per initial avalanche location")
-    call CFG_add(cfg, "avalanche%max_photons", 10*1000, &
+    call CFG_add(cfg, "avalanche%max_photons", 100*1000, &
          "Maximum number of photons produced by a single avalanche")
-    call CFG_add(cfg, "avalanche%inception_threshold", 1000, &
-         "Discharge inception when there are this many future avalanches")
+    call CFG_add(cfg, "avalanche%inception_count", 1000, &
+         "Inception occurs when there are this many future avalanches")
+    call CFG_add(cfg, "avalanche%inception_size", 1e8_dp, &
+         "Inception occurs when an avalanche of at least this size occurs")
 
   end subroutine avalanche_create_config
 
@@ -53,7 +55,8 @@ contains
     integer                        :: n, ix, k, i_run, i_avalanche
     integer                        :: max_avalanches, n_runs
     integer                        :: max_photons
-    integer                        :: inception_threshold
+    integer                        :: inception_count
+    real(dp)                       :: inception_size
     integer                        :: n_photons, i_cell, n_secondary_electrons
     integer, parameter             :: n_vars = 9
     integer                        :: i_vars(n_vars)
@@ -77,7 +80,8 @@ contains
     call CFG_get(cfg, "avalanche%max_total_number", max_avalanches)
     call CFG_get(cfg, "avalanche%max_photons", max_photons)
     call CFG_get(cfg, "avalanche%n_runs", n_runs)
-    call CFG_get(cfg, "avalanche%inception_threshold", inception_threshold)
+    call CFG_get(cfg, "avalanche%inception_count", inception_count)
+    call CFG_get(cfg, "avalanche%inception_size", inception_size)
 
     allocate(avalanches(max_avalanches))
     allocate(absorption_locations(3, max_photons))
@@ -112,11 +116,20 @@ contains
           call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
                r_arrival, r_ion_arrival, i_avalanche, avalanches, pq)
 
+          inception(i_run) = .false.
+
           time_loop: do while (pq%n_stored > 0)
              ! Get the next avalanche
              call pqr_pop(pq, ix, time)
 
              associate (av => avalanches(ix))
+
+               if (av%avalanche_size > inception_size) then
+                  inception(i_run) = .true.
+                  inception_time(i_run) = time
+                  exit time_loop
+               end if
+
                if (photoi_enabled) then
                   ! Photons are assumed to all originate from the end position
                   ! of the avalanche
@@ -144,7 +157,11 @@ contains
                              i_avalanche, avalanches, pq)
 
                         ! Exit when the inception threshold has been reached
-                        if (pq%n_stored == inception_threshold) exit time_loop
+                        if (pq%n_stored == inception_count) then
+                           inception(i_run) = .true.
+                           inception_time(i_run) = time
+                           exit time_loop
+                        end if
                      end if
                   end do
                end if
@@ -172,16 +189,17 @@ contains
                              i_avalanche, avalanches, pq)
 
                         ! Exit when the inception threshold has been reached
-                        if (pq%n_stored == inception_threshold) exit time_loop
+                        if (pq%n_stored == inception_count) then
+                           inception(i_run) = .true.
+                           inception_time(i_run) = time
+                           exit time_loop
+                        end if
                      end do
                   end if
                end if
              end associate
 
           end do time_loop
-
-          inception(i_run) = (pq%n_stored >= inception_threshold)
-          inception_time(i_run) = time
        end do
 
        pdsim_ug%point_data(n, i_inception_time) = &
