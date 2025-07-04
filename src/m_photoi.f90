@@ -73,17 +73,18 @@ contains
     do n = 1, n_events
        if (events(n)%ctype == CS_ionize_t) then
           call photoi_sample_photons(rng, events(n)%part%x, events(n)%part%w, &
-               i, photo_pos(:, n_photons+1:))
+               huge(1), i, photo_pos(:, n_photons+1:))
           n_photons = n_photons + i
        end if
     end do
   end subroutine photoi_from_events
 
   subroutine photoi_sample_photons(rng, x_source, num_ionizations, &
-       n_photons, absorption_locations)
+       max_photons, n_photons, absorption_locations)
     type(RNG_t), intent(inout) :: rng
     real(dp), intent(in)       :: x_source(3)
     real(dp), intent(in)       :: num_ionizations
+    integer, intent(in)        :: max_photons !< Maximum number of photons
     integer, intent(out)       :: n_photons
     real(dp), intent(inout)    :: absorption_locations(:, :)
 
@@ -91,7 +92,7 @@ contains
     real(dp) :: num_mean, en_frac, fly_len
 
     num_mean  = pi_efficiency * pi_quench_fac * num_ionizations
-    n_photons = rng%poisson(num_mean)
+    n_photons = min(rng%poisson(num_mean), max_photons)
 
     if (size(absorption_locations, 1) /= 3) &
          error stop "absorption_locations should be sized (3, max_photons)"

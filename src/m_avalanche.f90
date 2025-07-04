@@ -34,8 +34,6 @@ contains
   subroutine avalanche_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
 
-    call CFG_add(cfg, "avalanche%max_total_number", 1000*1000, &
-         "Maximum total number of avalanches per run")
     call CFG_add(cfg, "avalanche%n_runs", 10, &
          "Number of runs per initial avalanche location")
     call CFG_add(cfg, "avalanche%max_photons", 100*1000, &
@@ -52,7 +50,7 @@ contains
     use m_random
     type(cfg_t), intent(inout) :: cfg
 
-    integer                        :: n, ix, k, i_run, i_avalanche
+    integer                        :: n, ix, k, i_run
     integer                        :: max_avalanches, n_runs
     integer                        :: max_photons
     integer                        :: inception_count
@@ -77,12 +75,12 @@ contains
     call iu_add_point_data(pdsim_ug, "inception_time", i_inception_time)
     call iu_add_point_data(pdsim_ug, "inception_prob", i_inception_prob)
 
-    call CFG_get(cfg, "avalanche%max_total_number", max_avalanches)
     call CFG_get(cfg, "avalanche%max_photons", max_photons)
     call CFG_get(cfg, "avalanche%n_runs", n_runs)
     call CFG_get(cfg, "avalanche%inception_count", inception_count)
     call CFG_get(cfg, "avalanche%inception_size", inception_size)
 
+    max_avalanches = 2 * inception_count
     allocate(avalanches(max_avalanches))
     allocate(absorption_locations(3, max_photons))
     allocate(inception(n_runs))
@@ -100,9 +98,8 @@ contains
        end if
 
        do i_run = 1, n_runs
-          i_avalanche = 0
           time = 0.0_dp
-          pq%n_stored = 0
+          call pqr_reset(pq)
 
           ! Parameters for the initial avalanche
           r = pdsim_ug%points(:, n)
@@ -114,13 +111,13 @@ contains
                [i_ion_x1, i_ion_x2, i_ion_x3])
 
           call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
-               r_arrival, r_ion_arrival, i_avalanche, avalanches, pq)
+               r_arrival, r_ion_arrival, avalanches, pq)
 
           inception(i_run) = .false.
 
           time_loop: do while (pq%n_stored > 0)
              ! Get the next avalanche
-             call pqr_pop(pq, ix, time)
+             call pqr_pop_aix(pq, ix, time)
 
              associate (av => avalanches(ix))
 
@@ -134,7 +131,8 @@ contains
                   ! Photons are assumed to all originate from the end position
                   ! of the avalanche
                   call photoi_sample_photons(rng, av%r_arrival, &
-                       real(av%avalanche_size, dp), n_photons, absorption_locations)
+                       real(av%avalanche_size, dp), max_photons, &
+                       n_photons, absorption_locations)
 
                   do k = 1, n_photons
                      i_cell = 0
@@ -154,7 +152,7 @@ contains
 
                         call add_new_avalanche(rng, time, r, w, k_integral, &
                              travel_time, r_arrival, r_ion_arrival, &
-                             i_avalanche, avalanches, pq)
+                             avalanches, pq)
 
                         ! Exit when the inception threshold has been reached
                         if (pq%n_stored == inception_count) then
@@ -186,7 +184,7 @@ contains
                      do k = 1, n_secondary_electrons
                         call add_new_avalanche(rng, time, r, w, k_integral, &
                              travel_time, r_arrival, r_ion_arrival, &
-                             i_avalanche, avalanches, pq)
+                             avalanches, pq)
 
                         ! Exit when the inception threshold has been reached
                         if (pq%n_stored == inception_count) then
@@ -217,7 +215,7 @@ contains
 
   !> Add a new avalanche to the list of avalanches, if it has a nonzero size
   subroutine add_new_avalanche(rng, time, r, w, k_integral, &
-       dt, r_arrival, r_ion_arrival, ix, avalanches, pq)
+       dt, r_arrival, r_ion_arrival, avalanches, pq)
     use m_random
     use iso_fortran_env, only: int64
     type(rng_t), intent(inout)       :: rng
@@ -228,18 +226,19 @@ contains
     real(dp), intent(in)             :: dt
     real(dp), intent(in)             :: r_arrival(3)
     real(dp), intent(in)             :: r_ion_arrival(3)
-    integer, intent(inout)           :: ix
     type(avalanche_t), intent(inout) :: avalanches(:)
     type(pqr_t), intent(inout)       :: pq
 
-    real(dp) :: p0, pgeom, tmp
+    integer  :: ix
+    real(dp) :: p0, pgeom, tmp, t_arrival
 
     ! Probability of the avalanche having size zero
     p0 = 1 - exp(k_integral)/w
 
     if (rng%unif_01() > p0) then
-       ! Add avalanche
-       ix = ix + 1
+       ! Get index for avalanche
+       t_arrival = time + dt
+       call pqr_push_aix(pq, ix, t_arrival)
 
        if (ix > size(avalanches)) then
           print *, "Avalanche index: ", ix
@@ -248,15 +247,14 @@ contains
           error stop "Not enough storage for avalanches"
        end if
 
-       ! Probability of geometric distribution
-       pgeom = 1/w
-
        associate (av => avalanches(ix))
+         ! Probability of geometric distribution
+         pgeom = 1/w
          av%t_source = time
          av%r_source = r
          av%r_arrival = r_arrival
          av%r_ion_arrival = r_ion_arrival
-         av%t_arrival = time + dt
+         av%t_arrival = t_arrival
 
          ! Sample avalanche size. Take care of cases when pgeom >= 1.0 due to
          ! numerical errors
@@ -267,8 +265,6 @@ contains
          end if
 
          av%avalanche_size = ceiling(tmp, int64)
-
-         call pqr_push(pq, ix, av%t_arrival)
        end associate
     end if
 
