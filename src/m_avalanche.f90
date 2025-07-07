@@ -6,6 +6,7 @@ module m_avalanche
   use m_pdsim
   use m_photoi
   use m_pq
+  use m_random
 
   implicit none
   private
@@ -47,30 +48,22 @@ contains
 
   !> Simulate avalanches as discrete events
   subroutine avalanche_simulate(cfg)
-    use m_random
+    use omp_lib
     type(cfg_t), intent(inout) :: cfg
 
-    integer                        :: n, ix, k, i_run
-    integer                        :: max_avalanches, n_runs
+    integer                        :: n
+    integer                        :: n_runs, thread_id
     integer                        :: max_photons
     integer                        :: inception_count
     real(dp)                       :: inception_size
-    integer                        :: n_photons, i_cell, n_secondary_electrons
-    integer, parameter             :: n_vars = 9
-    integer                        :: i_vars(n_vars)
-    real(dp)                       :: r(3), w, k_integral, travel_time
-    real(dp)                       :: time, r_arrival(3), r_ion_arrival(3)
-    real(dp)                       :: vars(n_vars)
-    real(dp)                       :: mean, p_avg, volume
+    real(dp)                       :: p_avg, volume
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp), allocatable          :: absorption_locations(:, :)
     real(dp), allocatable          :: inception_time(:)
     logical, allocatable           :: inception(:)
     type(pqr_t)                    :: pq
     type(rng_t)                    :: rng
-
-    i_vars = [i_w, i_k_integral, i_avalanche_time, i_x1, i_x2, i_x3, &
-         i_ion_x1, i_ion_x2, i_ion_x3]
+    type(prng_t)                   :: prng
 
     call iu_add_point_data(pdsim_ug, "inception_time", i_inception_time)
     call iu_add_point_data(pdsim_ug, "inception_prob", i_inception_prob)
@@ -80,130 +73,41 @@ contains
     call CFG_get(cfg, "avalanche%inception_count", inception_count)
     call CFG_get(cfg, "avalanche%inception_size", inception_size)
 
-    max_avalanches = 2 * inception_count
-    allocate(avalanches(max_avalanches))
+    allocate(avalanches(inception_count))
     allocate(absorption_locations(3, max_photons))
     allocate(inception(n_runs))
     allocate(inception_time(n_runs))
 
     ! Create priority queue that will store upcoming avalanches, sorted by
     ! their arrival time
-    call pqr_create(pq)
+    call pqr_create(pq, inception_count)
 
     call rng%set_random_seed()
+    call prng%init_parallel(omp_get_max_threads(), rng)
 
+    !$omp parallel private(n, thread_id, pq, avalanches, absorption_locations, &
+    !$omp &inception, inception_time)
+
+    ! Get a random number generator for each thread
+    thread_id = omp_get_thread_num() + 1
+    rng = prng%rngs(thread_id)
+
+    !$omp do schedule(dynamic)
     do n = 1, pdsim_ug%n_points
        if (modulo(n, pdsim_ug%n_points/100) == 0) then
           write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
        end if
 
-       do i_run = 1, n_runs
-          time = 0.0_dp
-          call pqr_reset(pq)
-
-          ! Parameters for the initial avalanche
-          r = pdsim_ug%points(:, n)
-          w = pdsim_ug%point_data(n, i_w)
-          k_integral = pdsim_ug%point_data(n, i_k_integral)
-          travel_time = pdsim_ug%point_data(n, i_avalanche_time)
-          r_arrival = pdsim_ug%point_data(n, [i_x1, i_x2, i_x3])
-          r_ion_arrival = pdsim_ug%point_data(n, &
-               [i_ion_x1, i_ion_x2, i_ion_x3])
-
-          call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
-               r_arrival, r_ion_arrival, avalanches, pq)
-
-          inception(i_run) = .false.
-
-          time_loop: do while (pq%n_stored > 0)
-             ! Get the next avalanche
-             call pqr_pop_aix(pq, ix, time)
-
-             associate (av => avalanches(ix))
-
-               if (av%avalanche_size > inception_size) then
-                  inception(i_run) = .true.
-                  inception_time(i_run) = time
-                  exit time_loop
-               end if
-
-               if (photoi_enabled) then
-                  ! Photons are assumed to all originate from the end position
-                  ! of the avalanche
-                  call photoi_sample_photons(rng, av%r_arrival, &
-                       real(av%avalanche_size, dp), max_photons, &
-                       n_photons, absorption_locations)
-
-                  do k = 1, n_photons
-                     i_cell = 0
-                     r = pdsim_convert_r(absorption_locations(:, k))
-                     call iu_get_cell(pdsim_ug, r, i_cell)
-
-                     if (i_cell > 0) then
-                        ! Photoelectron can contribute to new avalanche
-                        call iu_interpolate_at(pdsim_ug, r, n_vars, &
-                             i_vars, vars, i_cell)
-
-                        w = vars(1)
-                        k_integral = vars(2)
-                        travel_time = vars(3)
-                        r_arrival = vars(4:6)
-                        r_ion_arrival = vars(7:9)
-
-                        call add_new_avalanche(rng, time, r, w, k_integral, &
-                             travel_time, r_arrival, r_ion_arrival, &
-                             avalanches, pq)
-
-                        ! Exit when the inception threshold has been reached
-                        if (pq%n_stored == inception_count) then
-                           inception(i_run) = .true.
-                           inception_time(i_run) = time
-                           exit time_loop
-                        end if
-                     end if
-                  end do
-               end if
-
-               if (pdsim_ion_gamma_boundary > 0.0_dp) then
-                  ! Sample secondary emission due to ions
-                  mean = pdsim_ion_gamma_boundary * av%avalanche_size
-                  n_secondary_electrons = rng%poisson(mean)
-
-                  if (n_secondary_electrons > 0) then
-                     ! Get parameters for avalanches starting at boundary
-                     i_cell = 0
-                     call iu_interpolate_at(pdsim_ug, av%r_ion_arrival, &
-                          n_vars, i_vars, vars, i_cell)
-
-                     w = vars(1)
-                     k_integral = vars(2)
-                     travel_time = vars(3)
-                     r_arrival = vars(4:6)
-                     r_ion_arrival = vars(7:9)
-
-                     do k = 1, n_secondary_electrons
-                        call add_new_avalanche(rng, time, r, w, k_integral, &
-                             travel_time, r_arrival, r_ion_arrival, &
-                             avalanches, pq)
-
-                        ! Exit when the inception threshold has been reached
-                        if (pq%n_stored == inception_count) then
-                           inception(i_run) = .true.
-                           inception_time(i_run) = time
-                           exit time_loop
-                        end if
-                     end do
-                  end if
-               end if
-             end associate
-
-          end do time_loop
-       end do
+       call run_avalanche(n, n_runs, inception_count, inception_size, rng, &
+            pq, avalanches, max_photons, absorption_locations, &
+            inception, inception_time)
 
        pdsim_ug%point_data(n, i_inception_time) = &
             sum(inception_time, mask=inception)/max(1, count(inception))
        pdsim_ug%point_data(n, i_inception_prob) = count(inception) / real(n_runs, dp)
     end do
+    !$omp end do
+    !$omp end parallel
 
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
          pdsim_axisymmetric, p_avg, volume)
@@ -212,6 +116,137 @@ contains
     write(*, "(A,E12.4)") " Total volume of gas: ", volume
 
   end subroutine avalanche_simulate
+
+  !> Run n_runs avalanches starting at a point
+  subroutine run_avalanche(ip, n_runs, inception_count, inception_size, rng, &
+       pq, avalanches, max_photons, absorption_locations, &
+       inception, inception_time)
+    integer, intent(in)              :: ip !< Point index
+    integer, intent(in)              :: n_runs
+    integer, intent(in)              :: inception_count
+    real(dp), intent(in)             :: inception_size
+    type(rng_t), intent(inout)       :: rng
+    type(pqr_t), intent(inout)       :: pq
+    type(avalanche_t), intent(inout) :: avalanches(inception_count)
+    integer, intent(in)              :: max_photons
+    real(dp), intent(inout)          :: absorption_locations(3, max_photons)
+    logical, intent(out)             :: inception(n_runs)
+    real(dp), intent(out)            :: inception_time(n_runs)
+
+    integer, parameter :: n_vars = 9
+    integer            :: i_vars(n_vars)
+    integer            :: ix, k, i_run, i_cell
+    integer            :: n_photons, n_secondary_electrons
+    real(dp)           :: r(3), w, k_integral, travel_time
+    real(dp)           :: time, r_arrival(3), r_ion_arrival(3)
+    real(dp)           :: vars(n_vars), mean
+
+    i_vars = [i_w, i_k_integral, i_avalanche_time, i_x1, i_x2, i_x3, &
+             i_ion_x1, i_ion_x2, i_ion_x3]
+
+    do i_run = 1, n_runs
+       time = 0.0_dp
+       call pqr_reset(pq)
+
+       ! Parameters for the initial avalanche
+       r = pdsim_ug%points(:, ip)
+       w = pdsim_ug%point_data(ip, i_w)
+       k_integral = pdsim_ug%point_data(ip, i_k_integral)
+       travel_time = pdsim_ug%point_data(ip, i_avalanche_time)
+       r_arrival = pdsim_ug%point_data(ip, [i_x1, i_x2, i_x3])
+       r_ion_arrival = pdsim_ug%point_data(ip, &
+            [i_ion_x1, i_ion_x2, i_ion_x3])
+
+       call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
+            r_arrival, r_ion_arrival, avalanches, pq)
+
+       inception(i_run) = .false.
+
+       time_loop: do while (pq%n_stored > 0)
+          ! Get the next avalanche
+          call pqr_pop_aix(pq, ix, time)
+
+          associate (av => avalanches(ix))
+
+            if (av%avalanche_size > inception_size) then
+               inception(i_run) = .true.
+               inception_time(i_run) = time
+               exit time_loop
+            end if
+
+            if (photoi_enabled) then
+               ! Photons are assumed to all originate from the end position
+               ! of the avalanche
+               call photoi_sample_photons(rng, av%r_arrival, &
+                    real(av%avalanche_size, dp), max_photons, &
+                    n_photons, absorption_locations)
+
+               do k = 1, n_photons
+                  i_cell = 0
+                  r = pdsim_convert_r(absorption_locations(:, k))
+                  call iu_get_cell(pdsim_ug, r, i_cell)
+
+                  if (i_cell > 0) then
+                     ! Photoelectron can contribute to new avalanche
+                     call iu_interpolate_at(pdsim_ug, r, n_vars, &
+                          i_vars, vars, i_cell)
+
+                     w = vars(1)
+                     k_integral = vars(2)
+                     travel_time = vars(3)
+                     r_arrival = vars(4:6)
+                     r_ion_arrival = vars(7:9)
+
+                     call add_new_avalanche(rng, time, r, w, k_integral, &
+                          travel_time, r_arrival, r_ion_arrival, &
+                          avalanches, pq)
+
+                     ! Exit when the inception threshold has been reached
+                     if (pq%n_stored == inception_count) then
+                        inception(i_run) = .true.
+                        inception_time(i_run) = time
+                        exit time_loop
+                     end if
+                  end if
+               end do
+            end if
+
+            if (pdsim_ion_gamma_boundary > 0.0_dp) then
+               ! Sample secondary emission due to ions
+               mean = pdsim_ion_gamma_boundary * av%avalanche_size
+               n_secondary_electrons = rng%poisson(mean)
+
+               if (n_secondary_electrons > 0) then
+                  ! Get parameters for avalanches starting at boundary
+                  i_cell = 0
+                  call iu_interpolate_at(pdsim_ug, av%r_ion_arrival, &
+                       n_vars, i_vars, vars, i_cell)
+
+                  w = vars(1)
+                  k_integral = vars(2)
+                  travel_time = vars(3)
+                  r_arrival = vars(4:6)
+                  r_ion_arrival = vars(7:9)
+
+                  do k = 1, n_secondary_electrons
+                     call add_new_avalanche(rng, time, r, w, k_integral, &
+                          travel_time, r_arrival, r_ion_arrival, &
+                          avalanches, pq)
+
+                     ! Exit when the inception threshold has been reached
+                     if (pq%n_stored == inception_count) then
+                        inception(i_run) = .true.
+                        inception_time(i_run) = time
+                        exit time_loop
+                     end if
+                  end do
+               end if
+            end if
+          end associate
+
+       end do time_loop
+    end do
+  end subroutine run_avalanche
 
   !> Add a new avalanche to the list of avalanches, if it has a nonzero size
   subroutine add_new_avalanche(rng, time, r, w, k_integral, &
