@@ -28,7 +28,9 @@ contains
     call CFG_add(cfg, "integral%max_dx", 1e-3_dp, &
          "Maximum step size for K integral")
     call CFG_add(cfg, "integral%boundary_distance", 1e-6_dp, &
-         "Initially, keep this distance away from boundaries")
+         "For integration, keep this distance away from boundaries")
+    call CFG_add(cfg, "integral%move_distance", 1e-9_dp, &
+         "Move points this distance to avoid problems at interfaces")
   end subroutine integral_create_config
 
   subroutine integral_compute(cfg)
@@ -36,6 +38,7 @@ contains
     integer                    :: n
     integer                    :: max_steps, n_steps
     real(dp)                   :: min_dx, max_dx, boundary_distance
+    real(dp)                   :: move_distance
     real(dp)                   :: rtol, atol, r(3), w
     real(dp)                   :: field(pdsim_ndim), td(pdsim_ncols)
     real(dp)                   :: r_final(3)
@@ -50,6 +53,7 @@ contains
     call CFG_get(cfg, "integral%min_dx", min_dx)
     call CFG_get(cfg, "integral%max_dx", max_dx)
     call CFG_get(cfg, "integral%boundary_distance", boundary_distance)
+    call CFG_get(cfg, "integral%move_distance", move_distance)
 
     call iu_add_point_data(pdsim_ug, "K_integral", i_k_integral)
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
@@ -67,8 +71,8 @@ contains
     call iu_add_point_data(pdsim_ug, "ion_x3", i_ion_x3)
 
     ! Move mesh points slightly away from domain boundaries
-    call move_mesh_points_from_boundary(pdsim_ug, boundary_distance, &
-         moved_points)
+    call move_mesh_points_slightly(pdsim_ug, boundary_distance, &
+         move_distance, moved_points)
 
     allocate(y(pdsim_ndim+nvar, max_steps))
     allocate(y_field(pdsim_ndim, max_steps))
@@ -137,42 +141,51 @@ contains
 
   end subroutine integral_compute
 
-  !> Move mesh points slightly away from domain boundaries
-  subroutine move_mesh_points_from_boundary(ug, distance, points)
+  !> Move mesh points slightly away from domain boundaries. Other points are
+  !> also slightly moved, to avoid them being exactly on a material boundary
+  subroutine move_mesh_points_slightly(ug, bdist, mdist, points)
     type(iu_grid_t), intent(in)          :: ug
-    real(dp), intent(in)                 :: distance
+    !> How far points are moved from domain boundaries
+    real(dp), intent(in)                 :: bdist
+    !> How far other points are moved
+    real(dp), intent(in)                 :: mdist
     real(dp), allocatable, intent(inout) :: points(:, :)
 
     integer              :: n, k, i_point
-    real(dp)             :: center(3), direction(3)
+    real(dp)             :: center(3), direction(3), dist
     logical, allocatable :: moved(:)
 
     allocate(points(3, ug%n_points))
     allocate(moved(ug%n_points))
 
-    points = ug%points
-    moved = .false.
+    points(:, :) = ug%points
+    moved(:) = .false.
 
     do n = 1, ug%n_cells
        ! For cells in the gas, move boundary points inwards
-       if (abs(ug%cell_data(n, pdsim_cdata_material) - &
-            pdsim_gas_material_value) <= 0) then
+       if (nint(ug%cell_data(n, pdsim_cdata_material)) == &
+            pdsim_gas_material_value) then
+          center = iu_get_cell_center(ug, n)
           do k = 1, ug%n_points_per_cell
              i_point = ug%cells(k, n)
 
              ! Move points only once
-             if (ug%point_is_at_boundary(i_point) .and. &
-                  .not. moved(i_point)) then
-                center = iu_get_cell_center(ug, n)
+             if (.not. moved(i_point)) then
+                if (ug%point_is_at_boundary(i_point)) then
+                   dist = bdist
+                else
+                   dist = mdist
+                end if
+
                 direction = center - points(:, i_point)
-                points(:, i_point) = points(:, i_point) + distance * &
+                points(:, i_point) = points(:, i_point) + dist * &
                      direction / norm2(direction)
                 moved(i_point) = .true.
              end if
           end do
        end if
     end do
-  end subroutine move_mesh_points_from_boundary
+  end subroutine move_mesh_points_slightly
 
   !> Computes alpha effective and 1/velocity for electrons
   subroutine electron_sub(ndim, r, field, nvar, integrand)

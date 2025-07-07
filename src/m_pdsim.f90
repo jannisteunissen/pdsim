@@ -55,6 +55,7 @@ module m_pdsim
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
   integer, public, protected :: pdsim_cdata_material
+  integer, public, protected :: pdsim_pdata_material
   integer, public, protected :: pdsim_gas_material_value
   integer, public, protected :: pdsim_coord_system
   integer, public, protected :: pdsim_ndim
@@ -89,7 +90,7 @@ contains
          "Variable describing the material (point or cell data), or NONE", &
          required=.true.)
     call CFG_add(cfg, "input%gas_material_value", 0, &
-         "Value of the material variable in the gas phase")
+         "Value of the 'gas' material, should be lower than other materials")
     call CFG_add(cfg, "input%lookup_table_size", 1000, &
          "Size to use for cross section lookup table")
     call CFG_add(cfg, "input%alpha_eta_file", undefined_str, &
@@ -152,8 +153,8 @@ contains
     call CFG_get(cfg, "input%material_name", material_name)
     call CFG_get(cfg, "input%lookup_table_size", pdsim_table_size)
 
-    call store_material_as_cell_data(pdsim_ug, trim(material_name), &
-         pdsim_cdata_material)
+    call store_material_data(pdsim_ug, trim(material_name), &
+         pdsim_cdata_material, pdsim_pdata_material)
 
     call CFG_get_size(cfg, "input%field_component_names", n_field_comp)
 
@@ -276,44 +277,61 @@ contains
   end function pdsim_convert_r
 
   !> If the 'material' variable is not "NONE", find the cell data or point
-  !> data corresponding to it. In case of point data, convert to cell data.
-  subroutine store_material_as_cell_data(ug, name, i_material)
+  !> data corresponding to it. Convert one from the other so both are present.
+  subroutine store_material_data(ug, name, i_cdata, i_pdata)
     type(iu_grid_t), intent(inout)  :: ug
     !> Name of material variable or "NONE" if the whole domain is gas
     character(len=*), intent(in)    :: name
     !> Index of cell data variable corresponding to material
-    integer, intent(out)            :: i_material
+    integer, intent(out)            :: i_cdata
+    !> Index of point data variable corresponding to material
+    integer, intent(out)            :: i_pdata
     real(dp)                        :: fac
-    integer                         :: n
+    integer                         :: n, k, i_point
+
+    call iu_get_cell_data_index(ug, trim(name), i_cdata)
+    call iu_get_point_data_index(ug, trim(name), i_pdata)
 
     if (name == "NONE") then
-       i_material = -1
-       return
-    end if
+       ! Add all-gas material
+       call iu_add_cell_data(ug, "material_cdata", i_cdata)
+       call iu_add_point_data(ug, "material_pdata", i_pdata)
 
-    call iu_get_cell_data_index(ug, trim(name), i_material)
-    if (i_material >= 1) return
+       ug%cell_data(:, i_cdata) = pdsim_gas_material_value
+       ug%cell_data(:, i_pdata) = pdsim_gas_material_value
 
-    call iu_get_point_data_index(ug, trim(name), i_material)
+    else if (i_cdata > 0 .and. i_pdata == -1) then
+       ! Add point data
+       call iu_add_point_data(ug, "material_pdata", i_pdata)
 
-    if (i_material == -1) then
+
+       ! Set points to the lowest material value of the cells they are part of
+       ug%point_data(:, i_pdata) = 1000*1000
+
+       do n = 1, ug%n_cells
+          do k = 1, ug%n_points_per_cell
+             i_point = ug%cells(k, n)
+             ug%point_data(i_point, i_pdata) = min(ug%cell_data(n, i_cdata), &
+                  ug%point_data(i_point, i_pdata))
+          end do
+       end do
+
+    else if (i_cdata == -1 .and. i_pdata > 0) then
+       ! Add cell data
+       call iu_add_cell_data(ug, "material_cdata", i_cdata)
+
+       fac = 1.0_dp/ug%n_points_per_cell
+       do n = 1, ug%n_cells
+          ug%cell_data(n, ug%n_cell_data) = &
+               sum(ug%point_data(ug%cells(:, n), i_cdata)) * fac
+       end do
+
+    else if (i_cdata == -1 .and. i_pdata == -1) then
        write(error_unit, *) trim(name) // " not found"
        error stop "invalid input%material_name"
     end if
 
-    ! Convert point data to cell data
-    call iu_add_cell_data(ug, name // "_celldata", i_material)
-
-    fac = 1.0_dp/ug%n_points_per_cell
-
-    do n = 1, ug%n_cells
-       ug%cell_data(n, ug%n_cell_data) = &
-            sum(ug%point_data(ug%cells(:, n), i_material)) * fac
-    end do
-
-    i_material = ug%n_cell_data
-
-  end subroutine store_material_as_cell_data
+  end subroutine store_material_data
 
   !> Routine to read in tabulated data from a text file
   subroutine read_table_from_txt(file_name, n_columns, max_rows, array)
