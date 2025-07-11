@@ -305,7 +305,6 @@ contains
        ! Add point data
        call iu_add_point_data(ug, "material_pdata", i_pdata)
 
-
        ! Set points to the lowest material value of the cells they are part of
        ug%point_data(:, i_pdata) = 1000*1000
 
@@ -324,7 +323,7 @@ contains
        fac = 1.0_dp/ug%n_points_per_cell
        do n = 1, ug%n_cells
           ug%cell_data(n, ug%n_cell_data) = &
-               sum(ug%point_data(ug%cells(:, n), i_cdata)) * fac
+               sum(ug%point_data(ug%cells(:, n), i_pdata)) * fac
        end do
 
     else if (i_cdata == -1 .and. i_pdata == -1) then
