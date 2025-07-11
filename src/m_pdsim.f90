@@ -32,8 +32,9 @@ module m_pdsim
 
   real(dp), parameter :: material_threshold = 1e-8_dp
 
-  integer, public :: i_k_integral, i_alpha, i_eta
+  integer, public :: i_k_integral, i_alpha, i_eta, i_alpha_eff
   integer, public :: i_w, i_p0
+  integer, public :: i_kstar, i_p_m1
   integer, public :: i_x1, i_x2, i_x3
   integer, public :: i_ion_x1, i_ion_x2, i_ion_x3
   integer, public :: i_avalanche_time

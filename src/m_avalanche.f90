@@ -14,16 +14,17 @@ module m_avalanche
   type avalanche_t
      !> Start time
      real(dp)       :: t_source
+     !> Start location
+     real(dp)       :: r_source(3)
      !> Arrival time
      real(dp)       :: t_arrival
      !> Arrival location of avalanche
      real(dp)       :: r_arrival(3)
      !> Arrival location of positive ions
      real(dp)       :: r_ion_arrival(3)
-     !> Start location
-     real(dp)       :: r_source(3)
-     !> Final size of the avalanche
-     integer(int64) :: avalanche_size
+     !> Number of ionizations, including the one that created the first
+     !> electron, so this number starts at 1.
+     integer(int64) :: num_ionizations
   end type avalanche_t
 
   ! Public methods
@@ -137,11 +138,11 @@ contains
     integer            :: i_vars(n_vars)
     integer            :: ix, k, i_run, i_cell
     integer            :: n_photons, n_secondary_electrons
-    real(dp)           :: r(3), w, k_integral, travel_time
+    real(dp)           :: r(3), p_m1, k_star, travel_time
     real(dp)           :: time, r_arrival(3), r_ion_arrival(3)
     real(dp)           :: vars(n_vars), mean
 
-    i_vars = [i_w, i_k_integral, i_avalanche_time, i_x1, i_x2, i_x3, &
+    i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
              i_ion_x1, i_ion_x2, i_ion_x3]
 
     do i_run = 1, n_runs
@@ -150,14 +151,14 @@ contains
 
        ! Parameters for the initial avalanche
        r = pdsim_ug%points(:, ip)
-       w = pdsim_ug%point_data(ip, i_w)
-       k_integral = pdsim_ug%point_data(ip, i_k_integral)
+       p_m1 = pdsim_ug%point_data(ip, i_p_m1)
+       k_star = pdsim_ug%point_data(ip, i_kstar)
        travel_time = pdsim_ug%point_data(ip, i_avalanche_time)
        r_arrival = pdsim_ug%point_data(ip, [i_x1, i_x2, i_x3])
        r_ion_arrival = pdsim_ug%point_data(ip, &
             [i_ion_x1, i_ion_x2, i_ion_x3])
 
-       call add_new_avalanche(rng, time, r, w, k_integral, travel_time, &
+       call add_new_avalanche(rng, time, r, p_m1, k_star, travel_time, &
             r_arrival, r_ion_arrival, avalanches, pq)
 
        inception(i_run) = .false.
@@ -168,17 +169,16 @@ contains
 
           associate (av => avalanches(ix))
 
-            if (av%avalanche_size > inception_size) then
+            if (av%num_ionizations > inception_size) then
                inception(i_run) = .true.
                inception_time(i_run) = time
                exit time_loop
             end if
 
             if (photoi_enabled) then
-               ! Photons are assumed to all originate from the end position
-               ! of the avalanche
+               ! Subtract one since initial ionization does not produce photons
                call photoi_sample_photons(rng, av%r_arrival, &
-                    real(av%avalanche_size, dp), max_photons, &
+                    av%num_ionizations - 1.0_dp, max_photons, &
                     n_photons, absorption_locations)
 
                do k = 1, n_photons
@@ -191,13 +191,13 @@ contains
                      call iu_interpolate_at(pdsim_ug, r, n_vars, &
                           i_vars, vars, i_cell)
 
-                     w = vars(1)
-                     k_integral = vars(2)
+                     p_m1 = vars(1)
+                     k_star = vars(2)
                      travel_time = vars(3)
                      r_arrival = vars(4:6)
                      r_ion_arrival = vars(7:9)
 
-                     call add_new_avalanche(rng, time, r, w, k_integral, &
+                     call add_new_avalanche(rng, time, r, p_m1, k_star, &
                           travel_time, r_arrival, r_ion_arrival, &
                           avalanches, pq)
 
@@ -207,13 +207,18 @@ contains
                         inception_time(i_run) = time
                         exit time_loop
                      end if
+
+                     ! TODO: if no additional ionization was produced, we
+                     ! ignore the avalanche, but the probability of secondary
+                     ! emission from the single positive ion (from the photon)
+                     ! could be included.
                   end if
                end do
             end if
 
             if (pdsim_ion_gamma_boundary > 0.0_dp) then
                ! Sample secondary emission due to ions
-               mean = pdsim_ion_gamma_boundary * av%avalanche_size
+               mean = pdsim_ion_gamma_boundary * av%num_ionizations
                n_secondary_electrons = rng%poisson(mean)
 
                if (n_secondary_electrons > 0) then
@@ -222,14 +227,14 @@ contains
                   call iu_interpolate_at(pdsim_ug, av%r_ion_arrival, &
                        n_vars, i_vars, vars, i_cell)
 
-                  w = vars(1)
-                  k_integral = vars(2)
+                  p_m1 = vars(1)
+                  k_star = vars(2)
                   travel_time = vars(3)
                   r_arrival = vars(4:6)
                   r_ion_arrival = vars(7:9)
 
                   do k = 1, n_secondary_electrons
-                     call add_new_avalanche(rng, time, r, w, k_integral, &
+                     call add_new_avalanche(rng, time, r, p_m1, k_star, &
                           travel_time, r_arrival, r_ion_arrival, &
                           avalanches, pq)
 
@@ -249,15 +254,15 @@ contains
   end subroutine run_avalanche
 
   !> Add a new avalanche to the list of avalanches, if it has a nonzero size
-  subroutine add_new_avalanche(rng, time, r, w, k_integral, &
+  subroutine add_new_avalanche(rng, time, r, p_m1, k_star, &
        dt, r_arrival, r_ion_arrival, avalanches, pq)
     use m_random
     use iso_fortran_env, only: int64
     type(rng_t), intent(inout)       :: rng
     real(dp), intent(in)             :: time
     real(dp), intent(in)             :: r(3)
-    real(dp), intent(in)             :: w
-    real(dp), intent(in)             :: k_integral
+    real(dp), intent(in)             :: p_m1
+    real(dp), intent(in)             :: k_star
     real(dp), intent(in)             :: dt
     real(dp), intent(in)             :: r_arrival(3)
     real(dp), intent(in)             :: r_ion_arrival(3)
@@ -265,12 +270,10 @@ contains
     type(pqr_t), intent(inout)       :: pq
 
     integer  :: ix
-    real(dp) :: p0, pgeom, tmp, t_arrival
+    real(dp) :: pgeom, tmp, t_arrival
 
-    ! Probability of the avalanche having size zero
-    p0 = 1 - exp(k_integral)/w
-
-    if (rng%unif_01() > p0) then
+    ! Check if first electron produces additional ionization
+    if (rng%unif_01() > p_m1) then
        ! Get index for avalanche
        t_arrival = time + dt
        call pqr_push_aix(pq, ix, t_arrival)
@@ -284,22 +287,22 @@ contains
 
        associate (av => avalanches(ix))
          ! Probability of geometric distribution
-         pgeom = 1/w
+         pgeom = (1 - p_m1) / (exp(k_star) - p_m1)
+
+         ! Sample avalanche size. Take care of cases when pgeom >= 1.0 due
+         ! to numerical errors
+         if (pgeom < 1) then
+            tmp = log(1 - rng%unif_01()) / log(1 - pgeom)
+         else
+            tmp = 1.0_dp
+         end if
+
+         av%num_ionizations = ceiling(tmp, int64)
          av%t_source = time
          av%r_source = r
          av%r_arrival = r_arrival
          av%r_ion_arrival = r_ion_arrival
          av%t_arrival = t_arrival
-
-         ! Sample avalanche size. Take care of cases when pgeom >= 1.0 due to
-         ! numerical errors
-         if (pgeom < 1) then
-            tmp = log(1 - rng%unif_01()) / log(1 - pgeom)
-         else
-            tmp = 0.0_dp
-         end if
-
-         av%avalanche_size = ceiling(tmp, int64)
        end associate
     end if
 
