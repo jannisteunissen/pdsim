@@ -9,7 +9,7 @@ Idea: Store the coefficient as a variable on the mesh, in front of the surfaces
 Database with transport data
 ==
 
-Include data for different gases, taking care to include 3-body attachment in air. For mixtures, we would need to couple with a Boltzmann solver.
+Include data for different gases, taking care to include 3-body attachment in air. For mixtures, we would need to couple with a Boltzmann solver. For some mixtures, the inclusion of additional reactions might be important (e.g. 3-body processes in humid air).
 
 Database with secondary emission coefficients
 ==
