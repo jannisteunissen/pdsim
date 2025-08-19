@@ -37,6 +37,7 @@ module m_pdsim
   integer, public :: i_kstar, i_p_m1
   integer, public :: i_x1, i_x2, i_x3
   integer, public :: i_ion_x1, i_ion_x2, i_ion_x3
+  integer, public :: i_ion_gamma
   integer, public :: i_avalanche_time
   integer, public :: i_ion_time
   integer, public :: i_inception_time
@@ -50,13 +51,17 @@ module m_pdsim
   !> Positive ion mobility (m^2/Vs)
   real(dp), public, protected :: pdsim_ion_mobility
 
-  !> Secondary emission coefficient for ions reaching a boundary
-  real(dp), public, protected :: pdsim_ion_gamma_boundary
+  !> Secondary emission coefficient for ions reaching a boundary. The first
+  !> element is for reaching a domain boundary, the other elements are for
+  !> the non-gas materials in increasing order.
+  real(dp), public, protected, allocatable :: pdsim_ion_gamma_boundary(:)
+  logical, public, protected :: pdsim_ion_see_enabled
 
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
   integer, public, protected :: pdsim_icdata_material
-  integer, public, protected :: pdsim_gas_material_value
+  integer, public, parameter :: pdsim_gas_material_value = 0
+  integer, public, protected :: pdsim_num_materials
   integer, public, protected :: pdsim_coord_system
   integer, public, protected :: pdsim_ndim
   logical, public, protected :: pdsim_axisymmetric
@@ -74,6 +79,7 @@ contains
   !> Create configuration for pdsim module
   subroutine pdsim_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
+    real(dp)                   :: dummy_real(0)
 
     call CFG_add(cfg, "input%mesh", undefined_str, &
          "Input mesh file in (.binda format)", required=.true.)
@@ -89,16 +95,15 @@ contains
     call CFG_add(cfg, "input%material_name", undefined_str, &
          "Variable describing the material (point or cell data), or NONE", &
          required=.true.)
-    call CFG_add(cfg, "input%gas_material_value", 0, &
-         "Value of the 'gas' material, should be lower than other materials")
     call CFG_add(cfg, "input%lookup_table_size", 1000, &
          "Size to use for cross section lookup table")
     call CFG_add(cfg, "input%alpha_eta_file", undefined_str, &
          "File with field (V/m), alpha (1/m), eta (1/m), mu (m^2/Vs)")
     call CFG_add(cfg, "input%ion_mobility", 2e-4_dp, &
          "Positive ion mobility (m^2/Vs)")
-    call CFG_add(cfg, "input%ion_gamma_boundary", 0.0_dp, &
-         "Secondary emission coefficient for ions reaching a boundary")
+    call CFG_add(cfg, "input%ion_gamma_boundary", dummy_real, &
+         "Secondary emission coefficient for ions reaching a boundary", &
+         dynamic_size=.true.)
 
     call CFG_add(cfg, "gas%temperature", 300.0_dp, "Gas temperature (K)")
     call CFG_add(cfg, "gas%pressure", 1.0_dp, "Gas pressure (bar)")
@@ -149,12 +154,16 @@ contains
     call iu_read_grid(trim(mesh_file), pdsim_ug, r_scale_factor)
     pdsim_ndim = iu_ndim_cell_type(pdsim_ug%cell_type)
 
-    call CFG_get(cfg, "input%gas_material_value", pdsim_gas_material_value)
     call CFG_get(cfg, "input%material_name", material_name)
     call CFG_get(cfg, "input%lookup_table_size", pdsim_table_size)
 
     call store_material_data(pdsim_ug, trim(material_name), &
          pdsim_icdata_material)
+
+    ! Determine the number of materials, which should be numbered 0 (gas) to
+    ! N, where N is the number of non-gas materials.
+    pdsim_num_materials = 1 + &
+         maxval(pdsim_ug%icell_data(:, pdsim_icdata_material))
 
     call CFG_get_size(cfg, "input%field_component_names", n_field_comp)
 
@@ -200,7 +209,19 @@ contains
     end if
 
     call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
+
+    call CFG_get_size(cfg, "input%ion_gamma_boundary", n)
+
+    if (n /= pdsim_num_materials) then
+       print *, "input%ion_gamma_boundary should be specified for each"
+       print *, "material (domain boundary, material 1, ..., material N)"
+       print *, "Got size ", n, " while expecting size ", pdsim_num_materials
+       error stop "Invalid size for input%ion_gamma_boundary"
+    end if
+
+    allocate(pdsim_ion_gamma_boundary(n))
     call CFG_get(cfg, "input%ion_gamma_boundary", pdsim_ion_gamma_boundary)
+    pdsim_ion_see_enabled = (maxval(pdsim_ion_gamma_boundary) > 0.0_dp)
 
     call CFG_get_size(cfg, "gas%components", n_gas_comp)
     call CFG_get_size(cfg, "gas%fractions", n_gas_frac)

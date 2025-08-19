@@ -44,6 +44,7 @@ contains
     type(cfg_t), intent(inout) :: cfg
     integer                    :: n
     integer                    :: max_steps, n_steps
+    integer                    :: boundary_material
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: move_distance
     real(dp)                   :: rtol, atol, r(3), w
@@ -80,6 +81,7 @@ contains
     call iu_add_point_data(pdsim_ug, "ion_x1", i_ion_x1)
     call iu_add_point_data(pdsim_ug, "ion_x2", i_ion_x2)
     call iu_add_point_data(pdsim_ug, "ion_x3", i_ion_x3)
+    call iu_add_point_data(pdsim_ug, "ion_gamma", i_ion_gamma)
 
     ! Move mesh points slightly away from domain boundaries
     call move_mesh_points_slightly(pdsim_ug, boundary_distance, &
@@ -89,7 +91,7 @@ contains
     allocate(y_field(pdsim_ndim, max_steps))
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
-    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_avg)
+    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_avg, boundary_material)
     do n = 1, pdsim_ug%n_points
        r = moved_points(:, n)
 
@@ -137,7 +139,7 @@ contains
             r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
             min_dx, max_dx, max_steps, rtol, atol, reverse, nvar, y, y_field, &
             n_steps, pdsim_axisymmetric, &
-            pdsim_icdata_material, pdsim_gas_material_value)
+            pdsim_icdata_material, pdsim_gas_material_value, boundary_material)
 
        if (n_steps > max_steps) then
           print *, "Error for ion start position", r(1:pdsim_ndim)
@@ -151,6 +153,17 @@ contains
        r_final(pdsim_ndim+1:) = 0.0_dp
        r_final(1:pdsim_ndim) = y(1:pdsim_ndim, n_steps)
        pdsim_ug%point_data(n, [i_ion_x1, i_ion_x2, i_ion_x3]) = r_final
+
+       ! Store secondary emission coefficient
+       if (boundary_material < 0) then
+          ! Domain boundary
+          pdsim_ug%point_data(n, i_ion_gamma) = pdsim_ion_gamma_boundary(1)
+       else
+          ! Set coefficient for this material
+          pdsim_ug%point_data(n, i_ion_gamma) = &
+               pdsim_ion_gamma_boundary(1+boundary_material)
+       end if
+
     end do
     !$omp end parallel do
 

@@ -22,6 +22,8 @@ module m_avalanche
      real(dp)       :: r_arrival(3)
      !> Arrival location of positive ions
      real(dp)       :: r_ion_arrival(3)
+     !> Secondary emission coefficient for ions
+     real(dp)       :: ion_gamma
      !> Number of ionizations, including the one that created the first
      !> electron, so this number starts at 1.
      integer(int64) :: num_ionizations
@@ -134,16 +136,17 @@ contains
     logical, intent(out)             :: inception(n_runs)
     real(dp), intent(out)            :: inception_time(n_runs)
 
-    integer, parameter :: n_vars = 9
+    integer, parameter :: n_vars = 10
     integer            :: i_vars(n_vars)
     integer            :: ix, k, i_run, i_cell
     integer            :: n_photons, n_secondary_electrons
     real(dp)           :: r(3), p_m1, k_star, travel_time
     real(dp)           :: time, r_arrival(3), r_ion_arrival(3)
+    real(dp)           :: ion_gamma
     real(dp)           :: vars(n_vars), mean
 
     i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
-             i_ion_x1, i_ion_x2, i_ion_x3]
+             i_ion_x1, i_ion_x2, i_ion_x3, i_ion_gamma]
 
     do i_run = 1, n_runs
        time = 0.0_dp
@@ -157,9 +160,10 @@ contains
        r_arrival = pdsim_ug%point_data(ip, [i_x1, i_x2, i_x3])
        r_ion_arrival = pdsim_ug%point_data(ip, &
             [i_ion_x1, i_ion_x2, i_ion_x3])
+       ion_gamma = pdsim_ug%point_data(ip, i_ion_gamma)
 
        call add_new_avalanche(rng, time, r, p_m1, k_star, travel_time, &
-            r_arrival, r_ion_arrival, avalanches, pq)
+            r_arrival, r_ion_arrival, ion_gamma, avalanches, pq)
 
        inception(i_run) = .false.
 
@@ -196,9 +200,10 @@ contains
                      travel_time = vars(3)
                      r_arrival = vars(4:6)
                      r_ion_arrival = vars(7:9)
+                     ion_gamma = vars(10)
 
                      call add_new_avalanche(rng, time, r, p_m1, k_star, &
-                          travel_time, r_arrival, r_ion_arrival, &
+                          travel_time, r_arrival, r_ion_arrival, ion_gamma, &
                           avalanches, pq)
 
                      ! Exit when the inception threshold has been reached
@@ -216,9 +221,9 @@ contains
                end do
             end if
 
-            if (pdsim_ion_gamma_boundary > 0.0_dp) then
+            if (pdsim_ion_see_enabled) then
                ! Sample secondary emission due to ions
-               mean = pdsim_ion_gamma_boundary * av%num_ionizations
+               mean = av%ion_gamma * av%num_ionizations
                n_secondary_electrons = rng%poisson(mean)
 
                if (n_secondary_electrons > 0) then
@@ -232,10 +237,11 @@ contains
                   travel_time = vars(3)
                   r_arrival = vars(4:6)
                   r_ion_arrival = vars(7:9)
+                  ion_gamma = vars(10)
 
                   do k = 1, n_secondary_electrons
                      call add_new_avalanche(rng, time, r, p_m1, k_star, &
-                          travel_time, r_arrival, r_ion_arrival, &
+                          travel_time, r_arrival, r_ion_arrival, ion_gamma, &
                           avalanches, pq)
 
                      ! Exit when the inception threshold has been reached
@@ -255,7 +261,7 @@ contains
 
   !> Add a new avalanche to the list of avalanches, if it has a nonzero size
   subroutine add_new_avalanche(rng, time, r, p_m1, k_star, &
-       dt, r_arrival, r_ion_arrival, avalanches, pq)
+       dt, r_arrival, r_ion_arrival, ion_gamma, avalanches, pq)
     use m_random
     use iso_fortran_env, only: int64
     type(rng_t), intent(inout)       :: rng
@@ -266,6 +272,7 @@ contains
     real(dp), intent(in)             :: dt
     real(dp), intent(in)             :: r_arrival(3)
     real(dp), intent(in)             :: r_ion_arrival(3)
+    real(dp), intent(in)             :: ion_gamma
     type(avalanche_t), intent(inout) :: avalanches(:)
     type(pqr_t), intent(inout)       :: pq
 
@@ -302,6 +309,7 @@ contains
          av%r_source = r
          av%r_arrival = r_arrival
          av%r_ion_arrival = r_ion_arrival
+         av%ion_gamma = ion_gamma
          av%t_arrival = t_arrival
        end associate
     end if
