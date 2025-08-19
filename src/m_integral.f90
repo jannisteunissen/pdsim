@@ -99,7 +99,7 @@ contains
             r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
             min_dx, max_dx, max_steps, rtol, atol, reverse, nvar, y, y_field, &
             n_steps, pdsim_axisymmetric, &
-            pdsim_cdata_material, pdsim_gas_material_value)
+            pdsim_icdata_material, pdsim_gas_material_value)
 
        if (n_steps > max_steps) then
           print *, "Error for electron start position", r(1:pdsim_ndim)
@@ -137,7 +137,7 @@ contains
             r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
             min_dx, max_dx, max_steps, rtol, atol, reverse, nvar, y, y_field, &
             n_steps, pdsim_axisymmetric, &
-            pdsim_cdata_material, pdsim_gas_material_value)
+            pdsim_icdata_material, pdsim_gas_material_value)
 
        if (n_steps > max_steps) then
           print *, "Error for ion start position", r(1:pdsim_ndim)
@@ -178,7 +178,7 @@ contains
 
     do n = 1, ug%n_cells
        ! For cells in the gas, move boundary points inwards
-       if (nint(ug%cell_data(n, pdsim_cdata_material)) == &
+       if (ug%icell_data(n, pdsim_icdata_material) == &
             pdsim_gas_material_value) then
           center = iu_get_cell_center(ug, n)
           do k = 1, ug%n_points_per_cell

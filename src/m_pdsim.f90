@@ -55,8 +55,7 @@ module m_pdsim
 
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
-  integer, public, protected :: pdsim_cdata_material
-  integer, public, protected :: pdsim_pdata_material
+  integer, public, protected :: pdsim_icdata_material
   integer, public, protected :: pdsim_gas_material_value
   integer, public, protected :: pdsim_coord_system
   integer, public, protected :: pdsim_ndim
@@ -155,7 +154,7 @@ contains
     call CFG_get(cfg, "input%lookup_table_size", pdsim_table_size)
 
     call store_material_data(pdsim_ug, trim(material_name), &
-         pdsim_cdata_material, pdsim_pdata_material)
+         pdsim_icdata_material)
 
     call CFG_get_size(cfg, "input%field_component_names", n_field_comp)
 
@@ -278,55 +277,38 @@ contains
   end function pdsim_convert_r
 
   !> If the 'material' variable is not "NONE", find the cell data or point
-  !> data corresponding to it. Convert one from the other so both are present.
-  subroutine store_material_data(ug, name, i_cdata, i_pdata)
+  !> data corresponding to it, and store it as integer cell data.
+  subroutine store_material_data(ug, name, i_icdata)
     type(iu_grid_t), intent(inout)  :: ug
     !> Name of material variable or "NONE" if the whole domain is gas
     character(len=*), intent(in)    :: name
-    !> Index of cell data variable corresponding to material
-    integer, intent(out)            :: i_cdata
-    !> Index of point data variable corresponding to material
-    integer, intent(out)            :: i_pdata
+    !> Index of integer cell data variable corresponding to material
+    integer, intent(out)            :: i_icdata
     real(dp)                        :: fac
-    integer                         :: n, k, i_point
+    integer                         :: n, i_cdata, i_pdata
 
+    call iu_get_icell_data_index(ug, trim(name), i_icdata)
     call iu_get_cell_data_index(ug, trim(name), i_cdata)
     call iu_get_point_data_index(ug, trim(name), i_pdata)
 
     if (name == "NONE") then
        ! Add all-gas material
-       call iu_add_cell_data(ug, "material_cdata", i_cdata)
-       call iu_add_point_data(ug, "material_pdata", i_pdata)
-
-       ug%cell_data(:, i_cdata) = pdsim_gas_material_value
-       ug%cell_data(:, i_pdata) = pdsim_gas_material_value
-
-    else if (i_cdata > 0 .and. i_pdata == -1) then
-       ! Add point data
-       call iu_add_point_data(ug, "material_pdata", i_pdata)
-
-       ! Set points to the lowest material value of the cells they are part of
-       ug%point_data(:, i_pdata) = 1000*1000
-
-       do n = 1, ug%n_cells
-          do k = 1, ug%n_points_per_cell
-             i_point = ug%cells(k, n)
-             ug%point_data(i_point, i_pdata) = min(ug%cell_data(n, i_cdata), &
-                  ug%point_data(i_point, i_pdata))
-          end do
-       end do
-
-    else if (i_cdata == -1 .and. i_pdata > 0) then
-       ! Add cell data
-       call iu_add_cell_data(ug, "material_cdata", i_cdata)
+       call iu_add_icell_data(ug, "material", i_icdata)
+       ug%icell_data(:, i_icdata) = pdsim_gas_material_value
+    else if (i_icdata == -1 .and. i_cdata > 0) then
+       ! Convert cell data to integer
+       call iu_add_icell_data(ug, "material", i_icdata)
+       ug%icell_data(:, i_icdata) = nint(ug%cell_data(:, i_cdata))
+    else if (i_icdata == -1 .and. i_pdata > 0) then
+       ! Convert point data to cell data
+       call iu_add_icell_data(ug, "material", i_icdata)
 
        fac = 1.0_dp/ug%n_points_per_cell
        do n = 1, ug%n_cells
-          ug%cell_data(n, ug%n_cell_data) = &
-               sum(ug%point_data(ug%cells(:, n), i_pdata)) * fac
+          ug%icell_data(n, i_icdata) = nint(&
+               sum(ug%point_data(ug%cells(:, n), i_pdata)) * fac)
        end do
-
-    else if (i_cdata == -1 .and. i_pdata == -1) then
+    else if (i_icdata == -1) then
        write(error_unit, *) trim(name) // " not found"
        error stop "invalid input%material_name"
     end if
@@ -375,7 +357,7 @@ contains
          error stop "Axisymmetric should only be used in 2D"
 
     allocate(mask(ug%n_cells))
-    mask(:) = (nint(ug%cell_data(:, pdsim_cdata_material)) == &
+    mask(:) = (ug%icell_data(:, pdsim_icdata_material) == &
          pdsim_gas_material_value)
 
     ! Weight per point. An improvement could be to have a variable weight in

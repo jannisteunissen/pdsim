@@ -97,20 +97,20 @@ contains
   !> Check whether a particle is outside the gas
   integer function outside_check(my_part)
     type(PC_part_t), intent(inout) :: my_part
-    integer                        :: i_cell
-    real(dp)                       :: material, x(3)
+    integer                        :: i_cell, material
+    real(dp)                       :: x(3)
 
     outside_check = 0
 
-    if (pdsim_cdata_material > 0) then
+    if (pdsim_icdata_material > 0) then
        x = pdsim_convert_r(my_part%x)
 
        i_cell = 0
-       material = -1e100_dp
-       call iu_get_cell_scalar_at(pdsim_ug, x, pdsim_cdata_material, &
+       material = -1
+       call iu_get_icell_scalar_at(pdsim_ug, x, pdsim_icdata_material, &
             i_cell, material)
 
-       if (abs(material - pdsim_gas_material_value) > 1e-8_dp) then
+       if (material /= pdsim_gas_material_value) then
           outside_check = 1
        end if
     end if

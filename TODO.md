@@ -30,8 +30,8 @@ Allow to set the follow parameters that control photoionization in any gas mixtu
 * quenching pressure
 * absorption lengths (two assuming uniform distribution between these?)
 
-Photoemission
+Photoemission (photoelectron generation)
 ==
 
+* Can include a separate photoemission process
 * Detect photoionization photons hitting surfaces (but then what to do?)
-* Can also include a separate photoemission process
