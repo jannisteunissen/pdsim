@@ -355,6 +355,7 @@ contains
     real(dp) :: pgeom, tmp, t_arrival
     real(dp) :: p_m1, k_star, travel_time, r_arrival(3)
     real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
+    type(avalanche_t) :: av
 
     ! Unpack vars(:)
     p_m1          = vars(1)
@@ -367,8 +368,29 @@ contains
 
     ! Check if first electron produces additional ionization
     if (rng%unif_01() > p_m1) then
+
+       ! Probability of geometric distribution
+       pgeom = (1 - p_m1) / (exp(k_star) - 1)
+
+       ! Sample avalanche size from geometric distribution. Take care of cases
+       ! when pgeom >= 1.0 due to numerical errors
+       if (pgeom < 1) then
+          tmp = 1 + log(1 - rng%unif_01()) / log(1 - pgeom)
+       else
+          ! exp(k_star) - 1 is small, so avalanche should have zero size
+          return
+       end if
+
+       av%num_ionizations = ceiling(tmp, int64)
+       av%t_source = time
+       av%r_source = r
+       av%r_arrival = r_arrival
+       av%r_ion_arrival = r_ion_arrival
+       av%ion_gamma = ion_gamma
+       av%ion_travel_time = ion_time
+       av%t_arrival = time + travel_time
+
        ! Get index for avalanche
-       t_arrival = time + travel_time
        call pqr_push_aix(pq, ix, t_arrival)
 
        if (ix > size(avalanches)) then
@@ -378,27 +400,8 @@ contains
           error stop "Not enough storage for avalanches"
        end if
 
-       associate (av => avalanches(ix))
-         ! Probability of geometric distribution
-         pgeom = (1 - p_m1) / (exp(k_star) - p_m1)
-
-         ! Sample avalanche size. Take care of cases when pgeom >= 1.0 due
-         ! to numerical errors
-         if (pgeom < 1) then
-            tmp = log(1 - rng%unif_01()) / log(1 - pgeom)
-         else
-            tmp = 1.0_dp
-         end if
-
-         av%num_ionizations = ceiling(tmp, int64)
-         av%t_source = time
-         av%r_source = r
-         av%r_arrival = r_arrival
-         av%r_ion_arrival = r_ion_arrival
-         av%ion_gamma = ion_gamma
-         av%ion_travel_time = ion_time
-         av%t_arrival = t_arrival
-       end associate
+       ! Store avalanche
+       avalanches(ix) = av
     end if
 
   end subroutine add_new_avalanche
