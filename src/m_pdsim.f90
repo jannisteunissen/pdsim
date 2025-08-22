@@ -54,8 +54,18 @@ module m_pdsim
   !> Secondary emission coefficient for ions reaching a boundary. The first
   !> element is for reaching a domain boundary, the other elements are for
   !> the non-gas materials in increasing order.
-  real(dp), public, protected, allocatable :: pdsim_ion_gamma_boundary(:)
+  real(dp), public, protected, allocatable :: pdsim_ion_gamma(:)
+
+  !> Whether there is a positive ion SEE coefficient
   logical, public, protected :: pdsim_ion_see_enabled
+
+  !> Secondary emission coefficient for photons reaching a boundary. The first
+  !> element is for reaching a domain boundary, the other elements are for
+  !> the non-gas materials in increasing order.
+  real(dp), public, protected, allocatable :: pdsim_photoemission_gamma(:)
+
+  !> Whether there is a positive photon SEE coefficient on a boundary
+  logical, public, protected :: pdsim_photoemission_enabled
 
   type(iu_grid_t), public    :: pdsim_ug
   integer, public, protected :: pdsim_pdata_field(3)
@@ -101,8 +111,11 @@ contains
          "File with field (V/m), alpha (1/m), eta (1/m), mu (m^2/Vs)")
     call CFG_add(cfg, "input%ion_mobility", 2e-4_dp, &
          "Positive ion mobility (m^2/Vs)")
-    call CFG_add(cfg, "input%ion_gamma_boundary", dummy_real, &
+    call CFG_add(cfg, "input%ion_gamma", dummy_real, &
          "Secondary emission coefficient for ions reaching a boundary", &
+         dynamic_size=.true.)
+    call CFG_add(cfg, "input%photoemission_gamma", dummy_real, &
+         "Secondary emission coefficient for photons reaching a boundary", &
          dynamic_size=.true.)
 
     call CFG_add(cfg, "gas%temperature", 300.0_dp, "Gas temperature (K)")
@@ -210,18 +223,34 @@ contains
 
     call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
 
-    call CFG_get_size(cfg, "input%ion_gamma_boundary", n)
+    call CFG_get_size(cfg, "input%ion_gamma", n)
 
-    if (n /= pdsim_num_materials) then
-       print *, "input%ion_gamma_boundary should be specified for each"
+    if (n /= 0 .and. n /= pdsim_num_materials) then
+       print *, "input%ion_gamma should be specified for each"
        print *, "material (domain boundary, material 1, ..., material N)"
        print *, "Got size ", n, " while expecting size ", pdsim_num_materials
-       error stop "Invalid size for input%ion_gamma_boundary"
+       error stop "Invalid size for input%ion_gamma"
     end if
 
-    allocate(pdsim_ion_gamma_boundary(n))
-    call CFG_get(cfg, "input%ion_gamma_boundary", pdsim_ion_gamma_boundary)
-    pdsim_ion_see_enabled = (maxval(pdsim_ion_gamma_boundary) > 0.0_dp)
+    allocate(pdsim_ion_gamma(n))
+    call CFG_get(cfg, "input%ion_gamma", pdsim_ion_gamma)
+    pdsim_ion_see_enabled = (maxval(pdsim_ion_gamma) > 0.0_dp)
+
+    call CFG_get_size(cfg, "input%photoemission_gamma", n)
+
+    if (n /= 0 .and. n /= pdsim_num_materials) then
+       print *, "input%photoemission_gamma should be specified for each"
+       print *, "material (domain boundary, material 1, ..., material N)"
+       print *, "Got size ", n, " while expecting size ", pdsim_num_materials
+       error stop "Invalid size for input%photoemission_gamma"
+    end if
+
+    allocate(pdsim_photoemission_gamma(n))
+    call CFG_get(cfg, "input%photoemission_gamma", pdsim_photoemission_gamma)
+    pdsim_photoemission_enabled = (maxval(pdsim_photoemission_gamma) > 0.0_dp)
+
+    if (maxval(pdsim_photoemission_gamma) > 1) &
+         error stop "input%photoemission_gamma should be <= 1.0"
 
     call CFG_get_size(cfg, "gas%components", n_gas_comp)
     call CFG_get_size(cfg, "gas%fractions", n_gas_frac)

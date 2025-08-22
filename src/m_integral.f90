@@ -157,11 +157,11 @@ contains
        ! Store secondary emission coefficient
        if (boundary_material < 0) then
           ! Domain boundary
-          pdsim_ug%point_data(n, i_ion_gamma) = pdsim_ion_gamma_boundary(1)
+          pdsim_ug%point_data(n, i_ion_gamma) = pdsim_ion_gamma(1)
        else
           ! Set coefficient for this material
           pdsim_ug%point_data(n, i_ion_gamma) = &
-               pdsim_ion_gamma_boundary(1+boundary_material)
+               pdsim_ion_gamma(1+boundary_material)
        end if
 
     end do
