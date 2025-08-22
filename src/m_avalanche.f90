@@ -168,6 +168,7 @@ contains
        call add_new_avalanche(rng, time, r, vars, avalanches, pq)
 
        inception(i_run) = .false.
+       inception_time(i_run) = 0.0_dp
 
        do while (pq%n_stored > 0)
           ! Get the next avalanche

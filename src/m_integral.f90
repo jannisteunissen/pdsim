@@ -155,13 +155,17 @@ contains
        pdsim_ug%point_data(n, [i_ion_x1, i_ion_x2, i_ion_x3]) = r_final
 
        ! Store secondary emission coefficient
-       if (boundary_material < 0) then
-          ! Domain boundary
-          pdsim_ug%point_data(n, i_ion_gamma) = pdsim_ion_gamma(1)
+       if (pdsim_ion_see_enabled) then
+          if (boundary_material < 0) then
+             ! Domain boundary
+             pdsim_ug%point_data(n, i_ion_gamma) = pdsim_ion_gamma(1)
+          else
+             ! Set coefficient for this material
+             pdsim_ug%point_data(n, i_ion_gamma) = &
+                  pdsim_ion_gamma(1+boundary_material)
+          end if
        else
-          ! Set coefficient for this material
-          pdsim_ug%point_data(n, i_ion_gamma) = &
-               pdsim_ion_gamma(1+boundary_material)
+          pdsim_ug%point_data(n, i_ion_gamma) = 0.0_dp
        end if
 
     end do
