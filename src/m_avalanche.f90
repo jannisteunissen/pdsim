@@ -24,12 +24,14 @@ module m_avalanche
      real(dp)       :: r_ion_arrival(3)
      !> Secondary emission coefficient for ions
      real(dp)       :: ion_gamma
+     !> Ion travel time for secondary emission
+     real(dp)       :: ion_travel_time
      !> Number of ionizations, including the one that created the first
      !> electron, so this number starts at 1.
      integer(int64) :: num_ionizations
   end type avalanche_t
 
-  integer, parameter :: n_vars = 10
+  integer, parameter :: n_vars = 11
   integer            :: i_vars(n_vars)
 
   !> Produce photoemission this distance away from the boundary
@@ -154,7 +156,7 @@ contains
 
     ! Set module-level variable
     i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
-         i_ion_x1, i_ion_x2, i_ion_x3, i_ion_gamma]
+         i_ion_x1, i_ion_x2, i_ion_x3, i_ion_gamma, i_ion_time]
 
     do i_run = 1, n_runs
        time = 0.0_dp
@@ -318,7 +320,6 @@ contains
     real(dp) :: mean, r(3), vars(n_vars)
     integer  :: n_secondary_electrons, i_cell, k
 
-
     ! Sample secondary emission due to ions
     mean = av%ion_gamma * av%num_ionizations
     n_secondary_electrons = rng%poisson(mean)
@@ -330,7 +331,8 @@ contains
             n_vars, i_vars, vars, i_cell)
 
        do k = 1, n_secondary_electrons
-          call add_new_avalanche(rng, time, r, vars, avalanches, pq)
+          call add_new_avalanche(rng, time + av%ion_travel_time, r, &
+               vars, avalanches, pq)
 
           ! Exit when the inception threshold has been reached
           if (pq%n_stored == inception_count) exit
@@ -352,7 +354,7 @@ contains
     integer  :: ix
     real(dp) :: pgeom, tmp, t_arrival
     real(dp) :: p_m1, k_star, travel_time, r_arrival(3)
-    real(dp) :: r_ion_arrival(3), ion_gamma
+    real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
 
     ! Unpack vars(:)
     p_m1          = vars(1)
@@ -361,6 +363,7 @@ contains
     r_arrival     = vars(4:6)
     r_ion_arrival = vars(7:9)
     ion_gamma     = vars(10)
+    ion_time      = vars(11)
 
     ! Check if first electron produces additional ionization
     if (rng%unif_01() > p_m1) then
@@ -393,6 +396,7 @@ contains
          av%r_arrival = r_arrival
          av%r_ion_arrival = r_ion_arrival
          av%ion_gamma = ion_gamma
+         av%ion_travel_time = ion_time
          av%t_arrival = t_arrival
        end associate
     end if
