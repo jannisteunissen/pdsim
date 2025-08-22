@@ -353,7 +353,7 @@ contains
     type(pqr_t), intent(inout)       :: pq
 
     integer  :: ix
-    real(dp) :: pgeom, tmp, t_arrival
+    real(dp) :: pgeom, tmp
     real(dp) :: p_m1, k_star, travel_time, r_arrival(3)
     real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
     type(avalanche_t) :: av
@@ -392,7 +392,7 @@ contains
        av%t_arrival = time + travel_time
 
        ! Get index for avalanche
-       call pqr_push_aix(pq, ix, t_arrival)
+       call pqr_push_aix(pq, ix, av%t_arrival)
 
        if (ix > size(avalanches)) then
           print *, "Avalanche index: ", ix
