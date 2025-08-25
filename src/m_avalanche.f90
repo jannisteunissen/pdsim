@@ -72,6 +72,7 @@ contains
     integer                        :: inception_count
     real(dp)                       :: inception_size
     real(dp)                       :: p_avg, volume
+    real(dp)                       :: p_factor
     logical                        :: trace_photons
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp), allocatable          :: inception_time(:)
@@ -95,6 +96,10 @@ contains
     allocate(inception(n_runs))
     allocate(inception_time(n_runs))
 
+    ! Set module-level variable
+    i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
+         i_ion_x1, i_ion_x2, i_ion_x3, i_ion_gamma, i_ion_time]
+
     ! Create priority queue that will store upcoming avalanches, sorted by
     ! their arrival time
     call pqr_create(pq, inception_count)
@@ -103,7 +108,7 @@ contains
     call prng%init_parallel(omp_get_max_threads(), rng)
 
     !$omp parallel private(n, thread_id, pq, avalanches, &
-    !$omp &inception, inception_time)
+    !$omp &inception, inception_time, p_factor)
 
     ! Get a random number generator for each thread
     thread_id = omp_get_thread_num() + 1
@@ -117,11 +122,12 @@ contains
 
        call run_avalanche(n, n_runs, inception_count, inception_size, &
             max_photons, trace_photons, rng, pq, avalanches, &
-            inception, inception_time)
+            inception, inception_time, p_factor)
 
        pdsim_ug%point_data(n, i_inception_time) = &
             sum(inception_time, mask=inception)/max(1, count(inception))
-       pdsim_ug%point_data(n, i_inception_prob) = count(inception) / real(n_runs, dp)
+       pdsim_ug%point_data(n, i_inception_prob) = p_factor * &
+            count(inception) / real(n_runs, dp)
     end do
     !$omp end do
     !$omp end parallel
@@ -137,7 +143,7 @@ contains
   !> Run n_runs avalanches starting at a point
   subroutine run_avalanche(ip, n_runs, inception_count, inception_size, &
        max_photons, trace_photons, rng, pq, avalanches, &
-       inception, inception_time)
+       inception, inception_time, p_factor)
     integer, intent(in)              :: ip !< Point index
     integer, intent(in)              :: n_runs
     integer, intent(in)              :: inception_count
@@ -149,26 +155,49 @@ contains
     type(avalanche_t), intent(inout) :: avalanches(inception_count)
     logical, intent(out)             :: inception(n_runs)
     real(dp), intent(out)            :: inception_time(n_runs)
+    !> Factor for inception probability
+    real(dp), intent(out)            :: p_factor
 
-    integer           :: ix, i_run
+    integer           :: ix, i_run, n_runs_half
     real(dp)          :: time, r(3), vars(n_vars)
+    real(dp)          :: p_m1, rand_num(n_runs), num_expected
     type(avalanche_t) :: av
 
-    ! Set module-level variable
-    i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
-         i_ion_x1, i_ion_x2, i_ion_x3, i_ion_gamma, i_ion_time]
+    inception(:) = .false.
+    inception_time(:) = 0.0_dp
 
-    do i_run = 1, n_runs
+    ! Parameters for the initial avalanche
+    r = pdsim_ug%points(:, ip)
+    vars = pdsim_ug%point_data(ip, i_vars)
+
+    ! Determine expected number of avalanches producing additional ionization
+    p_m1 = vars(1)
+    num_expected = (1 - p_m1) * n_runs
+
+    ! Half of number of runs to do
+    n_runs_half = min(ceiling(num_expected * 0.5_dp), n_runs/2)
+
+    ! Draw random numbers for first half
+    do i_run = 1, n_runs_half
+       rand_num(i_run) = rng%unif_01()
+    end do
+
+    ! Use antithetic variables for second half of runs
+    rand_num(n_runs_half+1:2*n_runs_half) = 1.0_dp - rand_num(1:n_runs_half)
+
+    ! Correct inception probability for rounding up the number of runs
+    if (n_runs_half > 0) then
+       p_factor = num_expected / (2 * n_runs_half)
+    else
+       p_factor = 0.0_dp
+    end if
+
+    do i_run = 1, 2 * n_runs_half
        time = 0.0_dp
        call pqr_reset(pq)
 
-       ! Parameters for the initial avalanche
-       r = pdsim_ug%points(:, ip)
-       vars = pdsim_ug%point_data(ip, i_vars)
-       call add_new_avalanche(rng, time, r, vars, avalanches, pq)
-
-       inception(i_run) = .false.
-       inception_time(i_run) = 0.0_dp
+       call add_new_avalanche(rng, time, r, vars, avalanches, pq, &
+            u01_created=1.0_dp, u01_size=rand_num(i_run))
 
        do while (pq%n_stored > 0)
           ! Get the next avalanche
@@ -342,7 +371,8 @@ contains
   end subroutine ion_SEE
 
   !> Add a new avalanche to the list of avalanches, if it has a nonzero size
-  subroutine add_new_avalanche(rng, time, r, vars, avalanches, pq)
+  subroutine add_new_avalanche(rng, time, r, vars, avalanches, pq, &
+       u01_created, u01_size)
     use m_random
     use iso_fortran_env, only: int64
     type(rng_t), intent(inout)       :: rng
@@ -351,9 +381,13 @@ contains
     real(dp), intent(in)             :: vars(n_vars)
     type(avalanche_t), intent(inout) :: avalanches(:)
     type(pqr_t), intent(inout)       :: pq
+    !> Uniform [0, 1) random number, determines if an avalanche is produced
+    real(dp), intent(in), optional   :: u01_created
+    !> Uniform [0, 1) random number used to sample avalanche size
+    real(dp), intent(in), optional   :: u01_size
 
     integer  :: ix
-    real(dp) :: pgeom, tmp
+    real(dp) :: pgeom, tmp, unif_01
     real(dp) :: p_m1, k_star, travel_time, r_arrival(3)
     real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
     type(avalanche_t) :: av
@@ -367,16 +401,28 @@ contains
     ion_gamma     = vars(10)
     ion_time      = vars(11)
 
+    if (present(u01_created)) then
+       unif_01 = u01_created
+    else
+       unif_01 = rng%unif_01()
+    end if
+
     ! Check if first electron produces additional ionization
-    if (rng%unif_01() > p_m1) then
+    if (unif_01 > p_m1) then
 
        ! Probability of geometric distribution
        pgeom = (1 - p_m1) / (exp(k_star) - 1)
 
-       ! Sample avalanche size from geometric distribution. Take care of cases
-       ! when pgeom >= 1.0 due to numerical errors
+       if (present(u01_size)) then
+          unif_01 = u01_size
+       else
+          unif_01 = rng%unif_01()
+       end if
+
+       ! Sample avalanche size from geometric distribution + 1. Take care of
+       ! cases when pgeom >= 1.0 due to numerical errors
        if (pgeom < 1) then
-          tmp = 1 + log(1 - rng%unif_01()) / log(1 - pgeom)
+          tmp = 1 + log(1 - unif_01) / log(1 - pgeom)
        else
           ! exp(k_star) - 1 is small, so avalanche should have zero size
           return
