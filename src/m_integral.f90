@@ -49,7 +49,7 @@ contains
     real(dp)                   :: move_distance
     real(dp)                   :: rtol, atol, r(3), w
     real(dp)                   :: field(pdsim_ndim), td(pdsim_ncols)
-    real(dp)                   :: r_final(3), p_m1, sum_ioniz, t_avg
+    real(dp)                   :: r_final(3), p_m1, sum_ioniz, t_final
     real(dp), allocatable      :: y(:, :), y_field(:, :)
     real(dp), allocatable      :: moved_points(:, :)
     logical                    :: reverse
@@ -91,7 +91,7 @@ contains
     allocate(y_field(pdsim_ndim, max_steps))
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
-    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_avg, boundary_material)
+    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material)
     do n = 1, pdsim_ug%n_points
        r = moved_points(:, n)
 
@@ -112,10 +112,10 @@ contains
        ! Compute integrals along path
        call compute_path_integrals(pdsim_ndim, nvar, n_steps, y(:, 1:n_steps), &
             y_field(:, 1:n_steps), w, sum_ioniz, p_m1, &
-            r_final(1:pdsim_ndim), t_avg)
+            r_final(1:pdsim_ndim), t_final)
 
        pdsim_ug%point_data(n, i_k_integral) = maxval(y(pdsim_ndim+i_Kint, 1:n_steps))
-       pdsim_ug%point_data(n, i_avalanche_time) = t_avg
+       pdsim_ug%point_data(n, i_avalanche_time) = t_final
 
        ! Store position
        r_final(pdsim_ndim+1:) = 0.0_dp
@@ -258,7 +258,7 @@ contains
 
   !> Compute several integrals along the electric field streamline
   subroutine compute_path_integrals(ndim, nvar, n_steps, y, y_field, w, &
-       sum_ioniz, p_m1, r_avg, t_avg)
+       sum_ioniz, p_m1, r_av, t_av)
     integer, intent(in)   :: ndim
     integer, intent(in)   :: nvar
     integer, intent(in)   :: n_steps
@@ -273,14 +273,15 @@ contains
     real(dp), intent(out) :: sum_ioniz
     !> The probability that there are no ionizations
     real(dp), intent(out) :: p_m1
-    !> The 'average' coordinate at which ionization is produced
-    real(dp), intent(out) :: r_avg(ndim)
-    !> The 'average' time at which ionization is produced
-    real(dp), intent(out) :: t_avg
+    !> The median coordinate at which ionization is produced
+    real(dp), intent(out) :: r_av(ndim)
+    !> The median time at which ionization is produced
+    real(dp), intent(out) :: t_av
 
-    integer  :: n
+    integer  :: n, i_step
     real(dp) :: alpha, eta, dx, field_norm, tmp, k0, k1
     real(dp) :: f1(n_steps), f2(n_steps), f3(n_steps)
+    real(dp) :: tmp_sum(n_steps)
 
     ! Threshold for non-zero ionization
     real(dp), parameter :: ionization_threshold = 1e-3_dp
@@ -297,22 +298,15 @@ contains
 
     ! Use composite trapezoidal rule to evaluate integrals
     w = 0.0_dp
-    sum_ioniz = 0.0_dp
     p_m1 = 0.0_dp
-    r_avg = 0.0_dp
-    t_avg = 0.0_dp
+    tmp_sum(1) = 0.0_dp
 
     do n = 1, n_steps-1
        dx = norm2(y(1:ndim, n+1) - y(1:ndim, n))
        w = w + dx * 0.5_dp * (f1(n) + f1(n+1))
 
        tmp = dx * 0.5_dp * (f2(n) + f2(n+1))
-       sum_ioniz = sum_ioniz + tmp
-
-       ! Average coordinate where ionization is produced
-       r_avg = r_avg + tmp * 0.5_dp * (y(1:ndim, n) + y(1:ndim, n+1))
-       t_avg = t_avg + tmp * 0.5_dp * (y(ndim+i_travel_time, n) + &
-            y(ndim+i_travel_time, n+1))
+       tmp_sum(n+1) = tmp_sum(n) + tmp
 
        ! Assume linear variation of term inside exponential, of the form k0 +
        ! k1 * (x - x0). Then integrate exponential term analytically,
@@ -322,14 +316,17 @@ contains
        p_m1 = p_m1 + 0.5_dp * (f3(n) + f3(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
     end do
 
-    ! 'Average' position and time where ionization was produced
+    sum_ioniz = tmp_sum(n_steps)
+    i_step = findloc(tmp_sum >= 0.5_dp * sum_ioniz, .true., dim=1)
+
+    ! Estimate of median position and time where ionization was produced
     if (sum_ioniz > ionization_threshold) then
-       r_avg = r_avg / sum_ioniz
-       t_avg = t_avg / sum_ioniz
+       r_av = y(1:ndim, i_step-1)
+       t_av = y(ndim+i_travel_time, i_step-1)
     else
        ! No ionization produced; take start location and time
-       r_avg = y(1:ndim, 1)
-       t_avg = y(ndim+i_travel_time, 1)
+       r_av = y(1:ndim, 1)
+       t_av = y(ndim+i_travel_time, 1)
     end if
 
     w = 1 + exp(y(ndim+i_Kint, n_steps)) * w
