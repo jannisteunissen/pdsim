@@ -26,8 +26,7 @@ module m_avalanche
      real(dp)       :: ion_gamma
      !> Ion travel time for secondary emission
      real(dp)       :: ion_travel_time
-     !> Number of ionizations, including the one that created the first
-     !> electron, so this number starts at 1.
+     !> Number of ionizations produced by the initial electron
      integer(int64) :: num_ionizations
   end type avalanche_t
 
@@ -162,7 +161,8 @@ contains
     !> Factor for inception probability
     real(dp), intent(out)            :: p_factor
 
-    integer           :: ix, i_run, n_runs_half
+    integer, parameter :: max_steps = 1000*1000
+    integer           :: ix, i_run, n_runs_half, i_step
     real(dp)          :: time, r(3), vars(n_vars)
     real(dp)          :: p_m1, rand_num(n_runs), num_expected
     type(avalanche_t) :: av
@@ -209,9 +209,14 @@ contains
        call add_new_avalanche(rng, time, r, vars, avalanches, pq, &
             u01_created=1.0_dp, u01_size=rand_num(i_run))
 
-       do while (pq%n_stored > 0)
-          ! Get the next avalanche
-          call pqr_pop_aix(pq, ix, time)
+       do i_step = 1, max_steps
+
+          if (pq%n_stored == 0) then
+             exit
+          else
+             ! Get the next avalanche
+             call pqr_pop_aix(pq, ix, time)
+          end if
 
           ! Store copy of avalanche, as the index might be overwritten
           av = avalanches(ix)
@@ -402,6 +407,8 @@ contains
     real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
     type(avalanche_t) :: av
 
+    real(dp), parameter :: eps = 1e-12_dp
+
     ! Unpack vars(:)
     p_m1          = vars(1)
     k_star        = vars(2)
@@ -430,15 +437,23 @@ contains
        end if
 
        ! Sample avalanche size from geometric distribution + 1. Take care of
-       ! cases when pgeom >= 1.0 due to numerical errors
-       if (pgeom < 1) then
-          tmp = 1 + log(1 - unif_01) / log(1 - pgeom)
-       else
+       ! cases when pgeom >= 1.0 (due to numerical errors) or pgeom ~ 0
+       if (pgeom < eps) then
+          ! Approximate 1/log(1-x) for small x
+          tmp = 1 + log(1 - unif_01) * (0.5_dp - 1/pgeom)
+       else if (pgeom > 1 - eps) then
           ! exp(k_star) - 1 is small, so avalanche should have zero size
           return
+       else
+          tmp = 1 + log(1 - unif_01) / log(1 - pgeom)
        end if
 
-       av%num_ionizations = ceiling(tmp, int64)
+       if (tmp < 1e16_dp) then
+          av%num_ionizations = ceiling(tmp, int64)
+       else
+          av%num_ionizations = huge(1_int64)
+       end if
+
        av%t_source = time
        av%r_source = r
        av%r_arrival = r_arrival
