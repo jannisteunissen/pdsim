@@ -48,6 +48,8 @@ contains
 
     call CFG_add(cfg, "avalanche%n_runs", 10, &
          "Number of runs per initial avalanche location")
+    call CFG_add(cfg, "avalanche%use_antithetic", .true., &
+         "Whether to use antithetic variates to reduce variance")
     call CFG_add(cfg, "avalanche%max_photons", 100*1000, &
          "Maximum number of photons produced by a single avalanche")
     call CFG_add(cfg, "avalanche%inception_count", 1000, &
@@ -73,7 +75,7 @@ contains
     real(dp)                       :: inception_size
     real(dp)                       :: p_avg, volume
     real(dp)                       :: p_factor
-    logical                        :: trace_photons
+    logical                        :: trace_photons, use_antithetic
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp), allocatable          :: inception_time(:)
     logical, allocatable           :: inception(:)
@@ -86,6 +88,7 @@ contains
 
     call CFG_get(cfg, "avalanche%max_photons", max_photons)
     call CFG_get(cfg, "avalanche%n_runs", n_runs)
+    call CFG_get(cfg, "avalanche%use_antithetic", use_antithetic)
     call CFG_get(cfg, "avalanche%inception_count", inception_count)
     call CFG_get(cfg, "avalanche%inception_size", inception_size)
     call CFG_get(cfg, "avalanche%trace_photons", trace_photons)
@@ -121,7 +124,7 @@ contains
        end if
 
        call run_avalanche(n, n_runs, inception_count, inception_size, &
-            max_photons, trace_photons, rng, pq, avalanches, &
+            max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
             inception, inception_time, p_factor)
 
        pdsim_ug%point_data(n, i_inception_time) = &
@@ -142,7 +145,7 @@ contains
 
   !> Run n_runs avalanches starting at a point
   subroutine run_avalanche(ip, n_runs, inception_count, inception_size, &
-       max_photons, trace_photons, rng, pq, avalanches, &
+       max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
        inception, inception_time, p_factor)
     integer, intent(in)              :: ip !< Point index
     integer, intent(in)              :: n_runs
@@ -150,6 +153,7 @@ contains
     real(dp), intent(in)             :: inception_size
     integer, intent(in)              :: max_photons
     logical, intent(in)              :: trace_photons
+    logical, intent(in)              :: use_antithetic
     type(rng_t), intent(inout)       :: rng
     type(pqr_t), intent(inout)       :: pq
     type(avalanche_t), intent(inout) :: avalanches(inception_count)
@@ -177,13 +181,19 @@ contains
     ! Half of number of runs to do
     n_runs_half = min(ceiling(num_expected * 0.5_dp), n_runs/2)
 
-    ! Draw random numbers for first half
-    do i_run = 1, n_runs_half
-       rand_num(i_run) = rng%unif_01()
-    end do
+    if (use_antithetic) then
+       ! Draw random numbers for first half
+       do i_run = 1, n_runs_half
+          rand_num(i_run) = rng%unif_01()
+       end do
 
-    ! Use antithetic variables for second half of runs
-    rand_num(n_runs_half+1:2*n_runs_half) = 1.0_dp - rand_num(1:n_runs_half)
+       ! Use antithetic variables for second half of runs
+       rand_num(n_runs_half+1:2*n_runs_half) = 1.0_dp - rand_num(1:n_runs_half)
+    else
+       do i_run = 1, 2*n_runs_half
+          rand_num(i_run) = rng%unif_01()
+       end do
+    end if
 
     ! Correct inception probability for rounding up the number of runs
     if (n_runs_half > 0) then
