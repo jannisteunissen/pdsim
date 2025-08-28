@@ -189,6 +189,11 @@ contains
 
        ! Use antithetic variables for second half of runs
        rand_num(n_runs_half+1:2*n_runs_half) = 1.0_dp - rand_num(1:n_runs_half)
+
+       ! Handle rare case of exactly 1.0_dp, to avoid issues with a log(1-x) later
+       where (rand_num(n_runs_half+1:2*n_runs_half) >= 1.0_dp)
+          rand_num(n_runs_half+1:2*n_runs_half) = 1 - epsilon(1.0_dp)
+       end where
     else
        do i_run = 1, 2*n_runs_half
           rand_num(i_run) = rng%unif_01()
