@@ -402,7 +402,7 @@ contains
     real(dp), intent(in), optional   :: u01_size
 
     integer  :: ix
-    real(dp) :: pgeom, tmp, unif_01
+    real(dp) :: pgeom, unif_01
     real(dp) :: p_m1, k_star, travel_time, r_arrival(3)
     real(dp) :: r_ion_arrival(3), ion_gamma, ion_time
     type(avalanche_t) :: av
@@ -438,20 +438,16 @@ contains
 
        ! Sample avalanche size from geometric distribution + 1. Take care of
        ! cases when pgeom >= 1.0 (due to numerical errors) or pgeom ~ 0
-       if (pgeom < eps) then
-          ! Approximate 1/log(1-x) for small x
-          tmp = 1 + log(1 - unif_01) * (0.5_dp - 1/pgeom)
-       else if (pgeom > 1 - eps) then
+       if (pgeom < 1 - eps) then
+          av%num_ionizations = geometric(unif_01, pgeom)
+       else
           ! exp(k_star) - 1 is small, so avalanche should have zero size
           return
-       else
-          tmp = 1 + log(1 - unif_01) / log(1 - pgeom)
        end if
 
-       if (tmp < 1e16_dp) then
-          av%num_ionizations = ceiling(tmp, int64)
-       else
-          av%num_ionizations = huge(1_int64)
+       ! Add one if it does not cause overflow
+       if (av%num_ionizations < huge(1_int64)) then
+          av%num_ionizations = av%num_ionizations + 1
        end if
 
        av%t_source = time
@@ -477,5 +473,47 @@ contains
     end if
 
   end subroutine add_new_avalanche
+
+  !> Compute log(1+x) with good accuracy, see "What Every Computer Scientist
+  !> Should Know About Floating-Point Arithmetic"
+  real(dp) function log1p(x)
+    real(dp), intent(in) :: x
+
+    if (1.0_dp + abs(x) > 1.0_dp) then
+       log1p = log(1.0_dp + x) * x / ((1.0_dp + x) - 1.0_dp)
+    else
+       log1p = x
+    endif
+  end function log1p
+
+  !> Return exponential random variate with a rate of one
+  real(dp) function exponential_standard(unif_01)
+    real(dp), intent(in) :: unif_01
+
+    if (unif_01 < 0.5_dp) then
+       exponential_standard = -log1p(-unif_01)
+    else
+       exponential_standard = -log(1 - unif_01)
+    end if
+  end function exponential_standard
+
+  !> Sample from geometric distribution with Pr(X = k) = (1 - p)^(k-1) * p
+  integer(int64) function geometric(unif_01, p)
+    real(dp), intent(in) :: unif_01
+    real(dp), intent(in) :: p
+    real(dp)             :: tmp
+    real(dp), parameter  :: threshold = real(huge(1_int64) - 1, dp)
+
+    ! Perform inversion sampling X = ceiling(log(U)/log(1-p))
+    tmp = -exponential_standard(unif_01) / log1p(-p)
+
+    ! Avoid overflow
+    if (tmp < threshold) then
+       geometric = ceiling(tmp, int64)
+    else
+       geometric = huge(1_int64)
+    end if
+
+  end function geometric
 
 end module m_avalanche
