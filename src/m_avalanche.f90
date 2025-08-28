@@ -285,6 +285,15 @@ contains
        i_start = 0
        call iu_get_cell(pdsim_ug, av%r_arrival, i_start)
 
+       ! Due to interpolation, av%r_arrival might not lie inside the gas. In
+       ! such cases, do not create photons
+       if (i_start == 0) then
+          return
+       else if (pdsim_ug%icell_data(i_start, pdsim_icdata_material) /= &
+            pdsim_gas_material_value) then
+          return
+       end if
+
        do k = 1, n_photons
           r = pdsim_convert_r(absorption_locations(:, k))
 
