@@ -4,7 +4,7 @@ LIBS := interp_unstructured particle_core
 LIBDIRS := interpolate_unstructured particle_core
 INCDIRS := interpolate_unstructured particle_core
 
-.PHONY:	all clean
+.PHONY:	all clean dependencies.make
 
 all: 	pdsim
 
@@ -23,6 +23,9 @@ build/%: build/%.o
 %: build/%
 	cp $^ $@
 
-# Dependency information generated with
-# fortdepend -f src/*.f90 -i m_cross_sec m_gas m_interp_unstructured m_particle_core m_random m_units_constants omp_lib -b build -w -o dependencies.make
+dependencies.make:
+	fortdepend -f src/*.f90 -i m_cross_sec m_gas m_interp_unstructured \
+	m_particle_core m_random m_units_constants omp_lib -b build \
+	-w -o dependencies.make
+
 include dependencies.make

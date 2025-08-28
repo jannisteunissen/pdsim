@@ -5,6 +5,7 @@ module m_pdsim
   use m_config
   use m_cross_sec
   use m_gas
+  use m_table_data
   use m_lookup_table
 
   implicit none
@@ -13,6 +14,12 @@ module m_pdsim
   integer, parameter, public :: dp = kind(0.0d0)
   real(dp), parameter, public :: undefined_real = -1e100_dp
   character(len=*), parameter, public :: undefined_str = "NOT_SPECIFIED"
+
+  ! Convert V/m to Townsend
+  real(dp), parameter, public :: SI_to_Townsend = 1e21_dp
+
+  ! Convert Townsend to V/m
+  real(dp), parameter, public :: Townsend_to_SI = 1e-21_dp
 
   integer, parameter :: pdsim_coord_2d = 1
   integer, parameter :: pdsim_coord_3d = 2
@@ -90,6 +97,7 @@ contains
   subroutine pdsim_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
     real(dp)                   :: dummy_real(0)
+    character(len=20)          :: dummy_string(0)
 
     call CFG_add(cfg, "input%mesh", undefined_str, &
          "Input mesh file in (.binda format)", required=.true.)
@@ -107,8 +115,17 @@ contains
          required=.true.)
     call CFG_add(cfg, "input%lookup_table_size", 1000, &
          "Size to use for cross section lookup table")
-    call CFG_add(cfg, "input%alpha_eta_file", undefined_str, &
-         "File with field (V/m), alpha (1/m), eta (1/m), mu (m^2/Vs)")
+    call CFG_add(cfg, "input%transport_data_file", undefined_str, &
+         "File with electron transport and reaction data", required=.true.)
+    call CFG_add(cfg, "input%input_interpolation", "linear", &
+         "Input interpolation method (linear, cubic_spline)")
+    ! TODO: include more species here, like N2
+    call CFG_add(cfg, "input%three_body_species", ['O2', 'H2O'], &
+         "Third bodies for three-body attachment", &
+         dynamic_size=.true.)
+    call CFG_add(cfg, "input%three_body_efficiencies", [1.0_dp, 6.0_dp], &
+         "Efficiencies of third bodies for three-body attachment", &
+         dynamic_size=.true.)
     call CFG_add(cfg, "input%ion_mobility", 2e-4_dp, &
          "Positive ion mobility (m^2/Vs)")
     call CFG_add(cfg, "input%ion_gamma", dummy_real, &
@@ -150,11 +167,6 @@ contains
     character(len=20), allocatable :: gas_names(:)
     real(dp), allocatable          :: gas_fracs(:)
     real(dp)                       :: temperature, pressure
-
-    ! Transport data
-    character(len=200)    :: alpha_eta_file
-    integer               :: n_rows
-    real(dp), allocatable :: field_alpha_eta(:, :)
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
     call check_path_writable(trim(pdsim_output_name))
@@ -266,26 +278,121 @@ contains
 
     call GAS_initialize(gas_names, gas_fracs, pressure, temperature)
 
-    call CFG_get(cfg, "input%alpha_eta_file", alpha_eta_file)
-
-    if (alpha_eta_file == undefined_str) &
-         error stop "input%alpha_eta_file is not set"
-
-    call read_table_from_txt(trim(alpha_eta_file), pdsim_ncols+1, 1000, &
-         field_alpha_eta)
-    n_rows = size(field_alpha_eta, 2)
-
-    pdsim_tdtbl = LT_create(field_alpha_eta(1, 1), &
-         field_alpha_eta(1, n_rows), pdsim_table_size, pdsim_ncols)
-
-    call LT_set_col(pdsim_tdtbl, pdsim_col_alpha, field_alpha_eta(1, :), &
-         field_alpha_eta(2, :))
-    call LT_set_col(pdsim_tdtbl, pdsim_col_eta, field_alpha_eta(1, :), &
-         field_alpha_eta(3, :))
-    call LT_set_col(pdsim_tdtbl, pdsim_col_mu, field_alpha_eta(1, :), &
-         field_alpha_eta(4, :))
+    call read_transport_data(cfg)
 
   end subroutine pdsim_initialize
+
+  !> Read input data and store it in a lookup table
+  subroutine read_transport_data(cfg)
+    type(CFG_t), intent(inout) :: cfg
+
+    character(len=200)             :: td_file
+    character(len=20)              :: method
+    integer                        :: input_interpolation, n, n_third
+    character(len=20), allocatable :: third_bodies(:)
+    real(dp), allocatable          :: xx(:), yy(:), efficiencies(:), v_drift(:)
+    real(dp)                       :: max_field, factor
+
+    call CFG_get(cfg, "input%transport_data_file", td_file)
+    call CFG_get(cfg, "input%input_interpolation", method)
+
+    select case (method)
+    case ("linear")
+       input_interpolation = table_interp_linear
+    case ("cubic_spline")
+       input_interpolation = table_interp_cubic_spline
+    case default
+       error stop "invalid input_interpolation method"
+    end select
+
+    call table_from_file(td_file, "Mobility *N (1/m/V/s)", xx, yy)
+
+    xx = xx * Townsend_to_SI * GAS_number_dens
+    max_field = xx(size(xx))
+    yy = yy / GAS_number_dens
+    pdsim_tdtbl = LT_create(0.0_dp, max_field, pdsim_table_size, pdsim_ncols)
+    call table_set_column(pdsim_tdtbl, pdsim_col_mu, xx, yy, &
+         input_interpolation)
+
+    call table_from_file(td_file, "Townsend ioniz. coef. alpha/N (m2)", &
+         xx, yy)
+    xx = xx * Townsend_to_SI * GAS_number_dens
+    yy = yy * GAS_number_dens
+    call table_set_column(pdsim_tdtbl, pdsim_col_alpha, xx, yy, &
+         input_interpolation)
+
+    call table_from_file(td_file, "Townsend attach. coef. eta/N (m2)", &
+         xx, yy)
+    xx = xx * Townsend_to_SI * GAS_number_dens
+    yy = yy * GAS_number_dens
+    call table_set_column(pdsim_tdtbl, pdsim_col_eta, xx, yy, &
+         input_interpolation)
+
+    ! Check for three-body attachment
+    call CFG_get_size(cfg, "input%three_body_species", n_third)
+
+    if (n_third > 0) then
+       allocate(third_bodies(n_third))
+       allocate(efficiencies(n_third))
+       call CFG_get(cfg, "input%three_body_species", third_bodies)
+       call CFG_get(cfg, "input%three_body_efficiencies", efficiencies)
+
+       call table_from_file(td_file, "Three-body attachment rate (m6/s)", &
+            xx, yy)
+
+       xx = xx * Townsend_to_SI * GAS_number_dens
+       v_drift = xx * LT_get_col(pdsim_tdtbl, pdsim_col_mu, xx)
+
+       ! Convert rate to Townsend attachment coefficient
+       yy = yy / v_drift
+
+       ! Multiply with number densities and efficiencies of third bodies
+       factor = 0.0_dp
+       do n = 1, n_third
+          factor = factor + GAS_number_dens * &
+               GAS_get_fraction(third_bodies(n)) * efficiencies(n)
+       end do
+
+       yy = yy * factor * GAS_number_dens
+
+       call table_set_column(pdsim_tdtbl, pdsim_col_eta, xx, yy, &
+            input_interpolation, add=.true.)
+    end if
+
+    call write_transport_data_summary(&
+         trim(pdsim_output_name) // "_transport_data.txt")
+
+  end subroutine read_transport_data
+
+  !> Write the transport data as used by the code to a file
+  subroutine write_transport_data_summary(fname)
+    character(len=*), intent(in) :: fname
+    integer                      :: my_unit, n
+
+    open(newunit=my_unit, file=trim(fname), action="write")
+    write(my_unit, "(A)") "E[V/m] alpha[1/m] eta[1/m] mu[m^2/(Vs)]"
+    do n = 1, pdsim_tdtbl%n_points
+       write(my_unit, *) pdsim_tdtbl%x(n), &
+            pdsim_tdtbl%cols_rows(pdsim_col_alpha, n), &
+            pdsim_tdtbl%cols_rows(pdsim_col_eta, n), &
+            pdsim_tdtbl%cols_rows(pdsim_col_mu, n)
+    end do
+    write(my_unit, *) ""
+    close(my_unit)
+
+    print *, "Wrote ", trim(fname)
+
+    do n = 1, pdsim_tdtbl%n_points
+       if (pdsim_tdtbl%cols_rows(pdsim_col_alpha, n) > &
+            pdsim_tdtbl%cols_rows(pdsim_col_eta, n)) exit
+    end do
+
+    if (n <= pdsim_tdtbl%n_points) then
+       write(*, "(A,E10.2)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
+    else
+       error stop "Critical not reached in input data"
+    end if
+  end subroutine write_transport_data_summary
 
   subroutine check_path_writable(pathname)
     character(len=*), intent(in) :: pathname
@@ -364,30 +471,6 @@ contains
     end if
 
   end subroutine store_material_data
-
-  !> Routine to read in tabulated data from a text file
-  subroutine read_table_from_txt(file_name, n_columns, max_rows, array)
-    character(len=*), intent(in)       :: file_name
-    integer, intent(in)                :: n_columns
-    integer, intent(in)                :: max_rows
-
-    real(dp), allocatable, intent(out) :: array(:, :)
-    real(dp), allocatable              :: tmp_array(:, :)
-    integer                            :: my_unit, n, io
-
-    allocate(tmp_array(n_columns, max_rows))
-    open(newunit=my_unit, file=trim(file_name), action = "read")
-
-    do n = 1, max_rows
-       read(my_unit, *, iostat=io) tmp_array(:, n)
-       if (io /= 0) exit
-    end do
-
-    close(my_unit)
-
-    allocate(array(n_columns, n-1))
-    array(:, 1:n-1) = tmp_array(:, 1:n-1)
-  end subroutine read_table_from_txt
 
   !> Compute volume average of a variable defined at points (vertices), only
   !> considering the gas phase

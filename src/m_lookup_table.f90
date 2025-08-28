@@ -255,30 +255,50 @@ contains
   end function LT_get_spaced_data
 
   !> Fill the column with index col_ix after linearly interpolating
-  subroutine LT_set_col(my_lt, col_ix, x, y)
-    type(LT_t), intent(inout) :: my_lt
-    integer, intent(in)       :: col_ix
-    real(dp), intent(in)      :: x(:), y(:)
+  subroutine LT_set_col(my_lt, col_ix, x, y, add)
+    type(LT_t), intent(inout)     :: my_lt
+    integer, intent(in)           :: col_ix
+    real(dp), intent(in)          :: x(:), y(:)
+    logical, intent(in), optional :: add
+    logical                       :: add_to
 
     if (col_ix < 0 .or. col_ix > my_lt%n_cols) &
          error stop "should have 1 <= col_ix <= n_cols"
 
-    my_lt%cols_rows(col_ix, :) = LT_get_spaced_data(x, y, my_lt%x)
+    add_to = .false.
+    if (present(add)) add_to = add
+
+    if (add_to) then
+       my_lt%cols_rows(col_ix, :) = my_lt%cols_rows(col_ix, :) + &
+            LT_get_spaced_data(x, y, my_lt%x)
+    else
+       my_lt%cols_rows(col_ix, :) = LT_get_spaced_data(x, y, my_lt%x)
+    end if
+
     my_lt%rows_cols(:, col_ix) = my_lt%cols_rows(col_ix, :)
   end subroutine LT_set_col
 
   !> Fill the column with index col_ix with y data
-  subroutine LT_set_col_data(my_lt, col_ix, y)
-    type(LT_t), intent(inout) :: my_lt
-    integer, intent(in)       :: col_ix
-    real(dp), intent(in)      :: y(:)
+  subroutine LT_set_col_data(my_lt, col_ix, y, add)
+    type(LT_t), intent(inout)     :: my_lt
+    integer, intent(in)           :: col_ix
+    real(dp), intent(in)          :: y(:)
+    logical, intent(in), optional :: add
+    logical                       :: add_to
 
     if (col_ix < 0 .or. col_ix > my_lt%n_cols) &
          error stop "should have 1 <= col_ix <= n_cols"
     if (size(y) /= my_lt%n_points) error stop "size(y) /= number of rows"
 
-    my_lt%cols_rows(col_ix, :) = y
-    my_lt%rows_cols(:, col_ix) = y
+    add_to = .false.
+    if (present(add)) add_to = add
+
+    if (add_to) then
+       my_lt%cols_rows(col_ix, :) = my_lt%cols_rows(col_ix, :) + y
+    else
+       my_lt%cols_rows(col_ix, :) = y
+    end if
+    my_lt%rows_cols(:, col_ix) = my_lt%cols_rows(col_ix, :)
   end subroutine LT_set_col_data
 
   !> Add a new column by linearly interpolating the (x, y) data
