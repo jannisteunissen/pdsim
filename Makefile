@@ -24,8 +24,8 @@ build/%: build/%.o
 	cp $^ $@
 
 dependencies.make:
-	fortdepend -f src/*.f90 -i m_cross_sec m_gas m_interp_unstructured \
-	m_particle_core m_random m_units_constants omp_lib -b build \
-	-w -o dependencies.make
+	fortdepend -f src/*.f90 -i m_cross_sec m_gas m_interp_unstructured	\
+	m_particle_core m_random m_units_constants m_lookup_table omp_lib -b	\
+	build -w -o dependencies.make
 
 include dependencies.make
