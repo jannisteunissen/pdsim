@@ -118,6 +118,8 @@ contains
          "File with electron transport and reaction data", required=.true.)
     call CFG_add(cfg, "input%input_interpolation", "linear", &
          "Input interpolation method (linear, cubic_spline)")
+    call CFG_add(cfg, "input%interpolation_xspacing", "linear", &
+         "Spacing used in lookup table (linear, quadratic, cubic)")
     ! TODO: include more species here, like N2
     call CFG_add(cfg, "input%three_body_species", ['O2 ', 'H2O'], &
          "Third bodies for three-body attachment", &
@@ -286,22 +288,35 @@ contains
     type(CFG_t), intent(inout) :: cfg
 
     character(len=200)             :: td_file
-    character(len=20)              :: method
+    character(len=20)              :: interp_method, xspacing_method
     integer                        :: input_interpolation, n, n_third
+    integer                        :: xspacing
     character(len=20), allocatable :: third_bodies(:)
     real(dp), allocatable          :: xx(:), yy(:), efficiencies(:), v_drift(:)
     real(dp)                       :: max_field, factor
 
     call CFG_get(cfg, "input%transport_data_file", td_file)
-    call CFG_get(cfg, "input%input_interpolation", method)
+    call CFG_get(cfg, "input%input_interpolation", interp_method)
+    call CFG_get(cfg, "input%interpolation_xspacing", xspacing_method)
 
-    select case (method)
+    select case (interp_method)
     case ("linear")
        input_interpolation = table_interp_linear
     case ("cubic_spline")
        input_interpolation = table_interp_cubic_spline
     case default
-       error stop "invalid input_interpolation method"
+       error stop "Invalid input_interpolation method"
+    end select
+
+    select case (xspacing_method)
+    case ("linear")
+       xspacing = LT_xspacing_linear
+    case ("quadratic")
+       xspacing = LT_xspacing_quadratic
+    case ("cubic")
+       xspacing = LT_xspacing_cubic
+    case default
+       error stop "Invalid input%interpolation_xspacing"
     end select
 
     call table_from_file(td_file, "Mobility *N (1/m/V/s)", xx, yy)
@@ -309,7 +324,8 @@ contains
     xx = xx * Townsend_to_SI * GAS_number_dens
     max_field = xx(size(xx))
     yy = yy / GAS_number_dens
-    pdsim_tdtbl = LT_create(0.0_dp, max_field, pdsim_table_size, pdsim_ncols)
+    pdsim_tdtbl = LT_create(0.0_dp, max_field, pdsim_table_size, pdsim_ncols, &
+         xspacing)
     call table_set_column(pdsim_tdtbl, pdsim_col_mu, xx, yy, &
          input_interpolation)
 
@@ -387,7 +403,7 @@ contains
     end do
 
     if (n <= pdsim_tdtbl%n_points) then
-       write(*, "(A,E10.2)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
+       write(*, "(A,2E11.3)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
     else
        error stop "Critical not reached in input data"
     end if
