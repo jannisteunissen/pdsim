@@ -97,7 +97,6 @@ contains
   subroutine pdsim_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
     real(dp)                   :: dummy_real(0)
-    character(len=20)          :: dummy_string(0)
 
     call CFG_add(cfg, "input%mesh", undefined_str, &
          "Input mesh file in (.binda format)", required=.true.)
@@ -120,7 +119,7 @@ contains
     call CFG_add(cfg, "input%input_interpolation", "linear", &
          "Input interpolation method (linear, cubic_spline)")
     ! TODO: include more species here, like N2
-    call CFG_add(cfg, "input%three_body_species", ['O2', 'H2O'], &
+    call CFG_add(cfg, "input%three_body_species", ['O2 ', 'H2O'], &
          "Third bodies for three-body attachment", &
          dynamic_size=.true.)
     call CFG_add(cfg, "input%three_body_efficiencies", [1.0_dp, 6.0_dp], &

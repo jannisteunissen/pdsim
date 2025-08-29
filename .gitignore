@@ -2,3 +2,5 @@
 /src/*.mod
 /pdsim
 /output/
+/input/transport_data/script/bolsig_script_*
+/input/transport_data/script/bolsig_result_*
