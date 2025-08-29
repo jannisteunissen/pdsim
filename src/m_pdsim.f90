@@ -120,8 +120,10 @@ contains
          "Input interpolation method (linear, cubic_spline)")
     call CFG_add(cfg, "input%interpolation_xspacing", "linear", &
          "Spacing used in lookup table (linear, quadratic, cubic)")
+    call CFG_add(cfg, "input%three_body_first_species", 'O2', &
+         "Primary species for three-body attachment")
     ! TODO: include more species here, like N2
-    call CFG_add(cfg, "input%three_body_species", ['O2 ', 'H2O'], &
+    call CFG_add(cfg, "input%three_body_second_species", ['O2 ', 'H2O'], &
          "Third bodies for three-body attachment", &
          dynamic_size=.true.)
     call CFG_add(cfg, "input%three_body_efficiencies", [1.0_dp, 6.0_dp], &
@@ -291,6 +293,7 @@ contains
     character(len=20)              :: interp_method, xspacing_method
     integer                        :: input_interpolation, n, n_third
     integer                        :: xspacing
+    character(len=20)              :: first_species
     character(len=20), allocatable :: third_bodies(:)
     real(dp), allocatable          :: xx(:), yy(:), efficiencies(:), v_drift(:)
     real(dp)                       :: max_field, factor
@@ -344,12 +347,13 @@ contains
          input_interpolation)
 
     ! Check for three-body attachment
-    call CFG_get_size(cfg, "input%three_body_species", n_third)
+    call CFG_get(cfg, "input%three_body_first_species", first_species)
+    call CFG_get_size(cfg, "input%three_body_second_species", n_third)
 
     if (n_third > 0) then
        allocate(third_bodies(n_third))
        allocate(efficiencies(n_third))
-       call CFG_get(cfg, "input%three_body_species", third_bodies)
+       call CFG_get(cfg, "input%three_body_second_species", third_bodies)
        call CFG_get(cfg, "input%three_body_efficiencies", efficiencies)
 
        call table_from_file(td_file, "Three-body attachment rate (m6/s)", &
@@ -368,7 +372,9 @@ contains
                GAS_get_fraction(third_bodies(n)) * efficiencies(n)
        end do
 
-       yy = yy * factor * GAS_number_dens
+       ! Multiply with first species
+       factor = factor * GAS_number_dens * GAS_get_fraction(first_species)
+       yy = yy * factor
 
        call table_set_column(pdsim_tdtbl, pdsim_col_eta, xx, yy, &
             input_interpolation, add=.true.)
