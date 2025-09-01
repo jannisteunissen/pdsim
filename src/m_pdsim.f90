@@ -84,6 +84,9 @@ module m_pdsim
   !> Point data: Estimated inception probability
   integer, public :: i_inception_prob
 
+  !> Point data: Estimated variance of inception probability
+  integer, public :: i_inception_pvar
+
   !> Base name for output
   character(len=200), public, protected :: pdsim_output_name
 
@@ -538,12 +541,13 @@ contains
 
   !> Compute volume average of a variable defined at points (vertices), only
   !> considering the gas phase
-  subroutine pdsim_pointdata_average(ug, iv, axisymmetric, avg, vol)
+  subroutine pdsim_pointdata_average(ug, iv, axisymmetric, power, avg, vol)
     type(iu_grid_t), intent(in) :: ug
-    integer, intent(in)         :: iv !< Index of point data variable
+    integer, intent(in)         :: iv    !< Index of point data variable
     logical, intent(in)         :: axisymmetric
-    real(dp), intent(out)       :: avg !< Average of the variable
-    real(dp), intent(out)       :: vol !< Total volume
+    integer, intent(in)         :: power !< Use dV**power (1 for normal average)
+    real(dp), intent(out)       :: avg   !< Average of the variable
+    real(dp), intent(out)       :: vol   !< Total volume
     integer                     :: n, k, i_point
     real(dp)                    :: dV, total_sum, w
     real(dp)                    :: center(3)
@@ -577,12 +581,13 @@ contains
           vol = vol + dV
           do k = 1, ug%n_points_per_cell
              i_point = ug%cells(k, n)
-             total_sum = total_sum + dV * w * ug%point_data(i_point, iv)
+             total_sum = total_sum + dV**power * w * &
+                  ug%point_data(i_point, iv)
           end do
        end if
     end do
 
-    avg = total_sum / vol
+    avg = total_sum / vol**power
 
   end subroutine pdsim_pointdata_average
 

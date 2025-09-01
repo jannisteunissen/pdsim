@@ -72,18 +72,20 @@ contains
     integer                        :: max_photons
     integer                        :: inception_count
     real(dp)                       :: inception_size
-    real(dp)                       :: p_avg, volume
-    real(dp)                       :: p_factor
+    real(dp)                       :: p_avg, pvar_avg, volume
     logical                        :: trace_photons, use_antithetic
     type(avalanche_t), allocatable :: avalanches(:)
-    real(dp), allocatable          :: inception_time(:)
-    logical, allocatable           :: inception(:)
+    real(dp)                       :: inception_time
+    real(dp)                       :: inception_probability
+    real(dp)                       :: inception_pvar
     type(pqr_t)                    :: pq
     type(rng_t)                    :: rng
     type(prng_t)                   :: prng
 
+    call iu_reserve_point_data_storage(pdsim_ug, 3)
     call iu_add_point_data(pdsim_ug, "inception_time", i_inception_time)
     call iu_add_point_data(pdsim_ug, "inception_prob", i_inception_prob)
+    call iu_add_point_data(pdsim_ug, "inception_pvar", i_inception_pvar)
 
     call CFG_get(cfg, "avalanche%max_photons", max_photons)
     call CFG_get(cfg, "avalanche%n_runs", n_runs)
@@ -95,8 +97,6 @@ contains
          photoemission_boundary_distance)
 
     allocate(avalanches(inception_count))
-    allocate(inception(n_runs))
-    allocate(inception_time(n_runs))
 
     ! Set module-level variable
     i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
@@ -110,7 +110,7 @@ contains
     call prng%init_parallel(omp_get_max_threads(), rng)
 
     !$omp parallel private(n, thread_id, pq, avalanches, &
-    !$omp &inception, inception_time, p_factor)
+    !$omp &inception_probability, inception_time, inception_pvar)
 
     ! Get a random number generator for each thread
     thread_id = omp_get_thread_num() + 1
@@ -123,36 +123,38 @@ contains
           write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
        end if
 
-       call run_avalanche(n, n_runs, inception_count, inception_size, &
+       call run_avalanches(n, n_runs, inception_count, inception_size, &
             max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-            inception, inception_time, p_factor)
+            inception_probability, inception_time, inception_pvar)
 
-       pdsim_ug%point_data(n, i_inception_time) = &
-            sum(inception_time, mask=inception)/max(1, count(inception))
-       pdsim_ug%point_data(n, i_inception_prob) = p_factor * &
-            count(inception) / real(n_runs, dp)
+       pdsim_ug%point_data(n, i_inception_time) = inception_time
+       pdsim_ug%point_data(n, i_inception_prob) = inception_probability
+       pdsim_ug%point_data(n, i_inception_pvar) = inception_pvar
     end do
     !$omp end do
     !$omp end parallel
 
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
-         pdsim_axisymmetric, p_avg, volume)
+         pdsim_axisymmetric, 1, p_avg, volume)
+    call pdsim_pointdata_average(pdsim_ug, i_inception_pvar, &
+         pdsim_axisymmetric, 2, pvar_avg, volume)
 
     if (pdsim_verbosity > 0) then
        write(*, "(A,E11.3)") " Average inception probability: ", p_avg
+       write(*, "(A,E11.3)") " Standard deviation bound: ", sqrt(pvar_avg)
        write(*, "(A,E12.4)") " Total volume of gas: ", volume
     else
-       write(*, "(2E11.3)") p_avg, volume
+       write(*, "(3E11.3)") p_avg, sqrt(pvar_avg), volume
     end if
 
   end subroutine avalanche_simulate
 
   !> Run n_runs avalanches starting at a point
-  subroutine run_avalanche(ip, n_runs, inception_count, inception_size, &
+  subroutine run_avalanches(ip, n_runs_max, inception_count, inception_size, &
        max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-       inception, inception_time, p_factor)
+       inception_probability, inception_time, inception_pvar)
     integer, intent(in)              :: ip !< Point index
-    integer, intent(in)              :: n_runs
+    integer, intent(in)              :: n_runs_max
     integer, intent(in)              :: inception_count
     real(dp), intent(in)             :: inception_size
     integer, intent(in)              :: max_photons
@@ -161,19 +163,23 @@ contains
     type(rng_t), intent(inout)       :: rng
     type(pqr_t), intent(inout)       :: pq
     type(avalanche_t), intent(inout) :: avalanches(inception_count)
-    logical, intent(out)             :: inception(n_runs)
-    real(dp), intent(out)            :: inception_time(n_runs)
-    !> Factor for inception probability
-    real(dp), intent(out)            :: p_factor
+    real(dp), intent(out) :: inception_probability
+    real(dp), intent(out) :: inception_time
+    real(dp), intent(out) :: inception_pvar
+
+    logical             :: inception(n_runs_max)
+    real(dp)            :: t_inception(n_runs_max)
+    ! Factor for inception probability
+    real(dp)            :: p_factor
 
     integer, parameter :: max_steps = 1000*1000
-    integer           :: ix, i_run, n_runs_half, i_step
-    real(dp)          :: time, r(3), vars(n_vars)
-    real(dp)          :: p_m1, rand_num(n_runs), num_expected
+    integer           :: ix, n_runs, i_run, i_half, i_step
+    real(dp)          :: time, r(3), vars(n_vars), p, p_bnd
+    real(dp)          :: p_m1, rand_num(n_runs_max), num_expected
     type(avalanche_t) :: av
 
     inception(:) = .false.
-    inception_time(:) = 0.0_dp
+    t_inception(:) = 0.0_dp
 
     ! Parameters for the initial avalanche
     r = pdsim_ug%points(:, ip)
@@ -181,38 +187,25 @@ contains
 
     ! Determine expected number of avalanches producing additional ionization
     p_m1 = vars(1)
-    num_expected = (1 - p_m1) * n_runs
+    num_expected = (1 - p_m1) * n_runs_max
+    n_runs = min(ceiling(num_expected), n_runs_max)
 
-    ! Half of number of runs to do
-    n_runs_half = min(ceiling(num_expected * 0.5_dp), n_runs/2)
+    do i_run = 1, n_runs
+       rand_num(i_run) = rng%unif_01()
+    end do
 
     if (use_antithetic) then
-       ! Draw random numbers for first half
-       do i_run = 1, n_runs_half
-          rand_num(i_run) = rng%unif_01()
-       end do
-
        ! Use antithetic variables for second half of runs
-       rand_num(n_runs_half+1:2*n_runs_half) = 1.0_dp - rand_num(1:n_runs_half)
+       i_half = (n_runs+1)/2
 
-       ! Handle rare case of exactly 1.0_dp, to avoid issues with a log(1-x) later
-       where (rand_num(n_runs_half+1:2*n_runs_half) >= 1.0_dp)
-          rand_num(n_runs_half+1:2*n_runs_half) = 1 - epsilon(1.0_dp)
-       end where
-    else
-       do i_run = 1, 2*n_runs_half
-          rand_num(i_run) = rng%unif_01()
+       do i_run = i_half + 1, n_runs
+          ! Avoid rare case of exactly 1.0_dp to avoid issues with a log(1-x)
+          rand_num(i_run) = 1.0_dp - max(rand_num(i_run - i_half), &
+               epsilon(1.0_dp))
        end do
     end if
 
-    ! Correct inception probability for rounding up the number of runs
-    if (n_runs_half > 0) then
-       p_factor = num_expected / (2 * n_runs_half)
-    else
-       p_factor = 0.0_dp
-    end if
-
-    do i_run = 1, 2 * n_runs_half
+    do i_run = 1, n_runs
        time = 0.0_dp
        call pqr_reset(pq)
 
@@ -260,11 +253,30 @@ contains
 
        if (inception(i_run)) then
           ! Store inception time
-          inception_time(i_run) = time
+          t_inception(i_run) = time
        end if
     end do
 
-  end subroutine run_avalanche
+    if (n_runs > 0) then
+       ! Correction factor for inception probability
+       p_factor = num_expected / n_runs_max
+
+       ! p is an estimate of the probability per actual run
+       p = count(inception) / real(n_runs, dp)
+
+       ! Estimate upper bound for sample variance of p
+       p_bnd = 0.5_dp
+       inception_pvar = p_bnd * (1 - p_bnd) / n_runs * p_factor**2
+    else
+       p_factor = 0.0_dp
+       p = 0.0_dp
+       inception_pvar = 0.0_dp
+    end if
+
+    inception_time = sum(t_inception, mask=inception)/max(1, count(inception))
+    inception_probability = p * p_factor
+
+  end subroutine run_avalanches
 
   !> Sample photoionization secondary electron emission from an avalanche and
   !> store the resulting new avalanches
