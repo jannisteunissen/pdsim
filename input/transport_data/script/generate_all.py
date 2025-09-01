@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import json
 
 # Compontens, fractions, authors, three-body attachment factor
 all_gases = [
@@ -38,56 +39,55 @@ def generate_script(files, species, fractions, script_name, bolsig_output,
         raise ValueError('Fractions are not normalized')
 
     template = r'''
-    /NOSCREEN
-    /NOLOGFILE
+/NOSCREEN
+/NOLOGFILE
 
-    _readcollisions_
+_readcollisions_
 
-    CONDITIONS
-    10.       / Electric field / N (Td)
-    0.        / Angular field frequency / N (m3/s)
-    0.        / Cosine of E-B field angle
-    300.      / Gas temperature (K)
-    300.      / Excitation temperature (K)
-    0.        / Transition energy (eV)
-    0         / Ionization degree
-    0         / Gas particle density (1/m3)
-    1.        / Ion charge parameter
-    1.        / Ion/neutral mass ratio
-    0         / e-e momentum effects & modified Coulomb logarithm: 0=No&No; 1=Yes&No; 2=No&Yes; 3=Yes&Yes*
-    1         / Energy sharing: 1=Equal*; 2=One takes all
-    1         / Growth: 1=Temporal*; 2=Spatial; 3=Not included; 4=Grad-n expansion
-    0.        / Maxwellian mean energy (eV)
-    400       / # of grid points
-    0         / Manual grid: 0=No; 1=Linear; 2=Parabolic
-    200.      / Manual maximum energy (eV)
-    1e-10     / Precision
-    1e-4      / Convergence
-    1000      / Maximum # of iterations
-    _fractions_  / Gas composition fractions
-    1         / Normalize composition to unity: 0=No; 1=Yes
+CONDITIONS
+10.       / Electric field / N (Td)
+0.        / Angular field frequency / N (m3/s)
+0.        / Cosine of E-B field angle
+300.      / Gas temperature (K)
+300.      / Excitation temperature (K)
+0.        / Transition energy (eV)
+0         / Ionization degree
+0         / Gas particle density (1/m3)
+1.        / Ion charge parameter
+1.        / Ion/neutral mass ratio
+0         / e-e momentum effects & modified Coulomb logarithm: 0=No&No; 1=Yes&No; 2=No&Yes; 3=Yes&Yes*
+1         / Energy sharing: 1=Equal*; 2=One takes all
+1         / Growth: 1=Temporal*; 2=Spatial; 3=Not included; 4=Grad-n expansion
+0.        / Maxwellian mean energy (eV)
+400       / # of grid points
+0         / Manual grid: 0=No; 1=Linear; 2=Parabolic
+200.      / Manual maximum energy (eV)
+1e-10     / Precision
+1e-4      / Convergence
+1000      / Maximum # of iterations
+_fractions_  / Gas composition fractions
+1         / Normalize composition to unity: 0=No; 1=Yes
 
-    RUNSERIES
-    1          / Variable: 1=E/N; 2=Mean energy; 3=Maxwellian energy
-    _min_Td_ _max_Td_  / Min Max
-    _num_Td_         / Number
-    _scale_Td_          / Type: 1=Linear; 2=Quadratic; 3=Exponential
+RUNSERIES
+1          / Variable: 1=E/N; 2=Mean energy; 3=Maxwellian energy
+_min_Td_ _max_Td_  / Min Max
+_num_Td_         / Number
+_scale_Td_          / Type: 1=Linear; 2=Quadratic; 3=Exponential
 
-    SAVERESULTS
-    _output_file_        / File
-    3        / Format: 1=Run by run; 2=Combined; 3=E/N; 4=Energy; 5=SIGLO; 6=PLASIMO
-    1        / Conditions: 0=No; 1=Yes
-    1        / Transport coefficients: 0=No; 1=Yes
-    1        / Rate coefficients: 0=No; 1=Yes
-    0        / Reverse rate coefficients: 0=No; 1=Yes
-    0        / Energy loss coefficients: 0=No; 1=Yes
-    0        / Distribution function: 0=No; 1=Yes
-    0        / Skip failed runs: 0=No; 1=Yes
-    0        / Include cross sections: 0=No; 1=Yes
+SAVERESULTS
+_output_file_        / File
+3        / Format: 1=Run by run; 2=Combined; 3=E/N; 4=Energy; 5=SIGLO; 6=PLASIMO
+1        / Conditions: 0=No; 1=Yes
+1        / Transport coefficients: 0=No; 1=Yes
+1        / Rate coefficients: 0=No; 1=Yes
+0        / Reverse rate coefficients: 0=No; 1=Yes
+0        / Energy loss coefficients: 0=No; 1=Yes
+0        / Distribution function: 0=No; 1=Yes
+0        / Skip failed runs: 0=No; 1=Yes
+0        / Include cross sections: 0=No; 1=Yes
 
-    END
-
-    '''
+END
+'''
 
     template_readcollision = r'''
     READCOLLISIONS
@@ -125,9 +125,6 @@ if __name__ == '__main__':
         basename = '_'.join([f'{s}_{f}_{a}' for s, f, a in
                             zip(species, fractions, authors)])
 
-        if f_3body is not None:
-            basename += f'_3ba_{f_3body}'
-
         files = [f'../../cross_sections/{s}_{a}.txt' for s, a in
                  zip(species, authors)]
 
@@ -142,3 +139,14 @@ if __name__ == '__main__':
 
         generate_script(files, species, fractions, script_name, bolsig_output,
                         min_Td, max_Td, num_Td, scale_Td, extrapolate)
+
+        metadata = {}
+
+        metadata['species'] = species
+        metadata['fractions'] = fractions
+        metadata['authors'] = authors
+        metadata['f_3body'] = f_3body
+
+        metadata_file = bolsig_output + '.json'
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=4)

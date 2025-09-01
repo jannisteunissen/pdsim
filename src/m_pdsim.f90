@@ -178,9 +178,6 @@ contains
 
     call CFG_add(cfg, "gas%temperature", 300.0_dp, "Gas temperature (K)")
     call CFG_add(cfg, "gas%pressure", 1.0_dp, "Gas pressure (bar)")
-    call CFG_add(cfg, "gas%components", ["N2", "O2"], "Gas components", .true.)
-    call CFG_add(cfg, "gas%fractions", [0.8_dp, 0.2_dp], &
-         "Partial pressure of the gases (as if they were ideal gases)", .true.)
 
     call CFG_add(cfg, "output%name", "output/pdsim", &
          "The base name for output files")
@@ -204,12 +201,6 @@ contains
     character(len=120)              :: material_name
     character(len=120), allocatable :: field_component_names(:)
     integer                         :: n_field_comp
-
-    ! Gas related parameters
-    integer                        :: n_gas_comp, n_gas_frac
-    character(len=20), allocatable :: gas_names(:)
-    real(dp), allocatable          :: gas_fracs(:)
-    real(dp)                       :: temperature, pressure
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
     call check_path_writable(trim(pdsim_output_name))
@@ -309,20 +300,6 @@ contains
     if (maxval(pdsim_photoemission_gamma) > 1) &
          error stop "input%photoemission_gamma should be <= 1.0"
 
-    call CFG_get_size(cfg, "gas%components", n_gas_comp)
-    call CFG_get_size(cfg, "gas%fractions", n_gas_frac)
-    if (n_gas_comp /= n_gas_frac) &
-         error stop "gas%components and gas%fractions have unequal size"
-    allocate(gas_names(n_gas_comp))
-    allocate(gas_fracs(n_gas_comp))
-
-    call CFG_get(cfg, "gas%temperature", temperature)
-    call CFG_get(cfg, "gas%pressure", pressure)
-    call CFG_get(cfg, "gas%components", gas_names)
-    call CFG_get(cfg, "gas%fractions", gas_fracs)
-
-    call GAS_initialize(gas_names, gas_fracs, pressure, temperature)
-
     call read_transport_data(cfg)
 
   end subroutine pdsim_initialize
@@ -339,6 +316,9 @@ contains
     character(len=20), allocatable :: third_bodies(:)
     real(dp), allocatable          :: xx(:), yy(:), efficiencies(:), v_drift(:)
     real(dp)                       :: max_field, factor
+    real(dp)                       :: temperature, pressure
+    character(len=20), allocatable :: gas_components(:)
+    real(dp), allocatable          :: gas_fracs(:)
 
     call CFG_get(cfg, "input%transport_data_file", td_file)
     call CFG_get(cfg, "input%input_interpolation", interp_method)
@@ -364,6 +344,25 @@ contains
        error stop "Invalid input%interpolation_xspacing"
     end select
 
+    ! Set the gas properties
+    call CFG_get(cfg, "gas%temperature", temperature)
+    call CFG_get(cfg, "gas%pressure", pressure)
+
+    call table_strings_numbers_from_file(td_file, "gas_composition", &
+         gas_components, gas_fracs)
+
+    if (pdsim_verbosity > 0) then
+       print *, "Gas composition:"
+       print *, "----------------------------"
+       do n = 1, size(gas_components)
+          write(*, "(A,A20,F8.3)") " ", gas_components(n), gas_fracs(n)
+       end do
+       print *, "----------------------------"
+    end if
+
+    call GAS_initialize(gas_components, gas_fracs, pressure, temperature)
+
+    ! Start reading transport data
     call table_from_file(td_file, "Mobility *N (1/m/V/s)", xx, yy)
 
     xx = xx * Townsend_to_SI * GAS_number_dens

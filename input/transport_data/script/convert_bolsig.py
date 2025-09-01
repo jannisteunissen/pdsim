@@ -2,6 +2,7 @@
 
 import numpy as np
 import argparse
+import json
 
 
 def get_data(lines, key, n_skip=0):
@@ -67,11 +68,11 @@ if __name__ == '__main__':
     for key in keys:
         data[key] = get_data(lines, key)
 
-    # Check for three-body attachment in filename
-    tmp = args.infile.split('_3ba_')
+    # Read metadata
+    with open(args.infile + '.json', 'r') as f:
+        metadata = json.load(f)
 
-    if len(tmp) > 1:
-        three_body_factor = float(tmp[1].split('.')[0])
+    if metadata['f_3body'] is not None:
         attachment_rates = get_attachment_rates(lines)
 
         # Find attachment process with lowest rate
@@ -80,11 +81,18 @@ if __name__ == '__main__':
         lowest = min(max_rates, key=max_rates.get)
 
         data['Three-body attachment rate (m6/s)'] = \
-            three_body_factor * attachment_rates[lowest]
+            metadata['f_3body'] * attachment_rates[lowest]
     else:
         data['Three-body attachment rate (m6/s)'] = None
 
     with open(args.outfile, 'wb') as f:
+
+        hdr = 'gas_composition\n-----------------------\n'
+        f.write(hdr.encode('ascii'))
+        for species, frac in zip(metadata['species'], metadata['fractions']):
+            f.write(f'{species} {frac}\n'.encode('ascii'))
+        f.write('-----------------------\n\n'.encode('ascii'))
+
         x_key = 'Electric field / N (Td)'
 
         for key in data:

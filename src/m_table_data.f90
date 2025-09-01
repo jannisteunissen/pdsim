@@ -19,6 +19,7 @@ module m_table_data
 
   ! Public methods
   public :: table_from_file
+  public :: table_strings_numbers_from_file
   public :: table_set_column
 
 contains
@@ -204,5 +205,66 @@ contains
     end subroutine print_usage
 
   end subroutine table_from_file
+
+  !> Read a list with strings and numbers from a file
+  subroutine table_strings_numbers_from_file(filename, data_name, &
+       strings, numbers)
+    character(len=*), intent(in)                 :: filename
+    character(len=*), intent(in)                 :: data_name
+    character(len=*), allocatable, intent(inout) :: strings(:)
+    real(dp), allocatable, intent(inout)         :: numbers(:)
+
+    character(len=string_len) :: line
+    integer                   :: my_unit, n_found, n
+    character(len=string_len) :: tmp_strings(table_max_rows)
+    real(dp)                  :: tmp_numbers(table_max_rows)
+
+    n_found = 0
+
+    open(newunit=my_unit, file=filename, action="read")
+
+    do
+       read(my_unit, "(A)", end=998) line
+       line = adjustl(line)
+
+       if (line == data_name) then
+          ! Read next line starting with at least 5 dashes
+          read(my_unit, "(A)") line
+          if (line(1:5) /= "-----") &
+               error stop "data name not followed by -----"
+          exit
+       end if
+    end do
+
+    ! Read ignored species, one per line
+    do
+       read(my_unit, "(A)", end=999) line
+       line = adjustl(line)
+
+       ! Ignore comments
+       if (line(1:1) == "#") cycle
+
+       ! Exit when we read a line of dashes
+       if (line(1:5) == "-----") exit
+
+       n_found = n_found + 1
+       read(line, *) tmp_strings(n_found), tmp_numbers(n_found)
+    end do
+
+998 close(my_unit)
+
+    allocate(strings(n_found))
+    allocate(numbers(n_found))
+
+    do n = 1, n_found
+       strings(n) = trim(tmp_strings(n))
+       numbers(n) = tmp_numbers(n)
+    end do
+
+    return
+
+    ! Error messages
+999 error stop "table_names_numbers: no closing dashes"
+  end subroutine table_strings_numbers_from_file
 
 end module m_table_data
