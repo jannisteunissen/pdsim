@@ -33,21 +33,22 @@ program pdsim
 
   select case (what_to_simulate)
      case ("integral")
-        print *, "Computing ionization integrals"
+        if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
         call integral_compute(cfg)
      case ("avalanches")
-        print *, "Computing ionization integrals"
+        if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
         call integral_compute(cfg)
-        print *, "Starting avalanche simulation"
+        if (pdsim_verbosity > 0) print *, "Starting avalanche simulation"
         call avalanche_simulate(cfg)
      case ("particles")
-        print *, "Starting particle simulation"
+        if (pdsim_verbosity > 0) print *, "Starting particle simulation"
         call particles_simulate(cfg)
      case default
         error stop "simulate option can be integral, avalanches, particles"
   end select
 
   call iu_write_vtk(pdsim_ug, trim(pdsim_output_name) // ".vtu")
-  print *, "Wrote ", trim(pdsim_output_name) // ".vtu"
+  if (pdsim_verbosity > 0) &
+       print *, "Wrote ", trim(pdsim_output_name) // ".vtu"
 
 end program pdsim

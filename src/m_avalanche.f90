@@ -118,7 +118,8 @@ contains
 
     !$omp do schedule(dynamic)
     do n = 1, pdsim_ug%n_points
-       if (modulo(n, pdsim_ug%n_points/100) == 0) then
+       if (modulo(n, pdsim_ug%n_points/100) == 0 .and. &
+            pdsim_verbosity > 0) then
           write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
        end if
 
@@ -137,8 +138,12 @@ contains
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
          pdsim_axisymmetric, p_avg, volume)
 
-    write(*, "(A,E11.3)") " Average inception probability: ", p_avg
-    write(*, "(A,E12.4)") " Total volume of gas: ", volume
+    if (pdsim_verbosity > 0) then
+       write(*, "(A,E11.3)") " Average inception probability: ", p_avg
+       write(*, "(A,E12.4)") " Total volume of gas: ", volume
+    else
+       write(*, "(2E11.3)") p_avg, volume
+    end if
 
   end subroutine avalanche_simulate
 

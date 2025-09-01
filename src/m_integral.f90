@@ -63,19 +63,23 @@ contains
     call CFG_get(cfg, "integral%boundary_distance", boundary_distance)
     call CFG_get(cfg, "integral%move_distance", move_distance)
 
+    call iu_reserve_point_data_storage(pdsim_ug, 17)
+
     call iu_add_point_data(pdsim_ug, "K_integral", i_k_integral)
+    call iu_add_point_data(pdsim_ug, "avalanche_p0", i_p0)
+    call iu_add_point_data(pdsim_ug, "avalanche_w", i_w)
+
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
     call iu_add_point_data(pdsim_ug, "eta", i_eta)
     call iu_add_point_data(pdsim_ug, "alpha_eff", i_alpha_eff)
-    call iu_add_point_data(pdsim_ug, "avalanche_p0", i_p0)
-    call iu_add_point_data(pdsim_ug, "avalanche_w", i_w)
+
+    call iu_add_point_data(pdsim_ug, "K_star", i_kstar)
+
+    call iu_add_point_data(pdsim_ug, "avalanche_p_m1", i_p_m1)
     call iu_add_point_data(pdsim_ug, "avalanche_time", i_avalanche_time)
     call iu_add_point_data(pdsim_ug, "avalanche_x1", i_x1)
     call iu_add_point_data(pdsim_ug, "avalanche_x2", i_x2)
     call iu_add_point_data(pdsim_ug, "avalanche_x3", i_x3)
-
-    call iu_add_point_data(pdsim_ug, "avalanche_p_m1", i_p_m1)
-    call iu_add_point_data(pdsim_ug, "K_star", i_kstar)
 
     call iu_add_point_data(pdsim_ug, "ion_time", i_ion_time)
     call iu_add_point_data(pdsim_ug, "ion_x1", i_ion_x1)

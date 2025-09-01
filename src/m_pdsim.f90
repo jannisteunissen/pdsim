@@ -39,18 +39,56 @@ module m_pdsim
 
   real(dp), parameter :: material_threshold = 1e-8_dp
 
-  integer, public :: i_k_integral, i_alpha, i_eta, i_alpha_eff
-  integer, public :: i_w, i_p0
-  integer, public :: i_kstar, i_p_m1
-  integer, public :: i_x1, i_x2, i_x3
-  integer, public :: i_ion_x1, i_ion_x2, i_ion_x3
-  integer, public :: i_ion_gamma
+  !> Point data: K integral
+  integer, public :: i_k_integral
+
+  !> Point data: Kendall w-function
+  integer, public :: i_w
+
+  !> Point data: Kendall P(n_electron=0)
+  integer, public :: i_p0
+
+  !> Point data: Ionization coefficient
+  integer, public :: i_alpha
+
+  !> Point data: Attachment coefficient
+  integer, public :: i_eta
+
+  !> Point data: Effective ionization coefficient
+  integer, public :: i_alpha_eff
+
+  !> Point data: K^*, which is like K but for number of ionizations
+  integer, public :: i_kstar
+
+  !> Point data: Probability of no further ionization by first electron
+  integer, public :: i_p_m1
+
+  !> Point data: Travel time of avalanche
   integer, public :: i_avalanche_time
+
+  !> Point data: Coordinates of avalanche arrival
+  integer, public :: i_x1, i_x2, i_x3
+
+  !> Point data: Travel time of ions
   integer, public :: i_ion_time
+
+  !> Point data: Coordinates of positive ion arrival
+  integer, public :: i_ion_x1, i_ion_x2, i_ion_x3
+
+  !> Point data: Secondary emission coefficient for positive ions
+  integer, public :: i_ion_gamma
+
+  !> Point data: Estimated inception time
   integer, public :: i_inception_time
+
+  !> Point data: Estimated inception probability
   integer, public :: i_inception_prob
 
+  !> Base name for output
   character(len=200), public, protected :: pdsim_output_name
+
+  !> How verbose the simulations are
+  integer, public, protected :: pdsim_verbosity
 
   !> Size for lookup tables used for interpolation
   integer, public, protected :: pdsim_table_size
@@ -146,6 +184,8 @@ contains
 
     call CFG_add(cfg, "output%name", "output/pdsim", &
          "The base name for output files")
+    call CFG_add(cfg, "output%verbosity", 1, &
+         "How verbose the simulations are (higher means more output)")
     call CFG_add(cfg, "output%particles", .true., &
          "Output the simulation particles in each run")
     call CFG_add(cfg, "output%particles_dt", 1e-9_dp, &
@@ -173,6 +213,8 @@ contains
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
     call check_path_writable(trim(pdsim_output_name))
+
+    call CFG_get(cfg, "output%verbosity", pdsim_verbosity)
 
     call CFG_write(cfg, trim(pdsim_output_name) // "_config.cfg")
 
@@ -401,7 +443,7 @@ contains
     write(my_unit, *) ""
     close(my_unit)
 
-    print *, "Wrote ", trim(fname)
+    if (pdsim_verbosity > 0) print *, "Wrote ", trim(fname)
 
     do n = 1, pdsim_tdtbl%n_points
        if (pdsim_tdtbl%cols_rows(pdsim_col_alpha, n) > &
@@ -409,7 +451,9 @@ contains
     end do
 
     if (n <= pdsim_tdtbl%n_points) then
-       write(*, "(A,2E11.3)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
+       if (pdsim_verbosity > 0) then
+          write(*, "(A,2E11.3)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
+       end if
     else
        error stop "Critical not reached in input data"
     end if
