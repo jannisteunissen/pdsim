@@ -308,7 +308,7 @@ contains
 
     integer  :: n, i_step
     real(dp) :: alpha, eta, dx, field_norm, tmp, k0, k1
-    real(dp) :: f1(n_steps), f2(n_steps), f3(n_steps)
+    real(dp) :: f1(n_steps), f2(n_steps)
     real(dp) :: tmp_sum(n_steps)
 
     ! Threshold for non-zero ionization
@@ -319,9 +319,8 @@ contains
        field_norm = norm2(y_field(:, n))
        alpha = LT_get_col(pdsim_tdtbl, pdsim_col_alpha, field_norm)
        eta = LT_get_col(pdsim_tdtbl, pdsim_col_eta, field_norm)
-       f1(n) = exp(-y(ndim+i_Kint, n)) * alpha
-       f2(n) = exp(y(ndim+i_Kint, n)) * alpha
-       f3(n) = eta
+       f1(n) = alpha
+       f2(n) = eta
     end do
 
     ! Use composite trapezoidal rule to evaluate integrals
@@ -331,17 +330,19 @@ contains
 
     do n = 1, n_steps-1
        dx = norm2(y(1:ndim, n+1) - y(1:ndim, n))
-       w = w + dx * 0.5_dp * (f1(n) + f1(n+1))
-
-       tmp = dx * 0.5_dp * (f2(n) + f2(n+1))
-       tmp_sum(n+1) = tmp_sum(n) + tmp
 
        ! Assume linear variation of term inside exponential, of the form k0 +
-       ! k1 * (x - x0). Then integrate exponential term analytically,
-       ! since it rapidly decays.
+       ! k1 * (x - x0). Then integrate exponential term analytically.
+       k0 = y(ndim+i_Kint, n)
+       k1 = (y(ndim+i_Kint, n+1) - y(ndim+i_Kint, n))/dx
+
+       w = w + 0.5_dp * (f1(n) + f1(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
+       tmp = 0.5_dp * (f1(n) + f1(n+1)) * exp(k0) * (exp(k1*dx) - 1)/k1
+       tmp_sum(n+1) = tmp_sum(n) + tmp
+
        k0 = y(ndim+i_Lint, n)
        k1 = (y(ndim+i_Lint, n+1) - y(ndim+i_Lint, n))/dx
-       p_m1 = p_m1 + 0.5_dp * (f3(n) + f3(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
+       p_m1 = p_m1 + 0.5_dp * (f2(n) + f2(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
     end do
 
     sum_ioniz = tmp_sum(n_steps)
