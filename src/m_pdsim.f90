@@ -2,6 +2,7 @@ module m_pdsim
   use iso_fortran_env, only: error_unit, int64
   use m_interp_unstructured
   use m_particle_core
+  use m_units_constants
   use m_config
   use m_cross_sec
   use m_gas
@@ -20,6 +21,9 @@ module m_pdsim
 
   ! Convert Townsend to V/m
   real(dp), parameter, public :: Townsend_to_SI = 1e-21_dp
+
+  ! Ideal gas number density at 300 K and 1 bar
+  real(dp), parameter :: N0_300K_1bar = 1e5_dp / (UC_boltzmann_const * 300)
 
   integer, parameter :: pdsim_coord_2d = 1
   integer, parameter :: pdsim_coord_3d = 2
@@ -170,8 +174,8 @@ contains
     call CFG_add(cfg, "input%three_body_efficiencies", [1.0_dp, 6.0_dp], &
          "Efficiencies of third bodies for three-body attachment", &
          dynamic_size=.true.)
-    call CFG_add(cfg, "input%ion_mobility", 2e-4_dp, &
-         "Positive ion mobility (m^2/Vs)")
+    call CFG_add(cfg, "input%ion_mobility", 2e-4_dp * N0_300K_1bar, &
+         "Reduced positive ion mobility [1/(m V s)]")
     call CFG_add(cfg, "input%ion_gamma", dummy_real, &
          "Secondary emission coefficient for ions reaching a boundary", &
          dynamic_size=.true.)
@@ -272,8 +276,6 @@ contains
        pdsim_coord_system = pdsim_coord_3d
     end if
 
-    call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
-
     call CFG_get_size(cfg, "input%ion_gamma", n)
 
     if (n /= 0 .and. n /= pdsim_num_materials) then
@@ -364,6 +366,12 @@ contains
     end if
 
     call GAS_initialize(gas_components, gas_fracs, pressure, temperature)
+
+    ! Set ion mobility
+    call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
+
+    ! Convert to non-reduced units
+    pdsim_ion_mobility = pdsim_ion_mobility / GAS_number_dens
 
     ! Start reading transport data
     call table_from_file(td_file, "Mobility *N (1/m/V/s)", xx, yy)
