@@ -52,6 +52,7 @@ contains
     real(dp)                   :: r_final(3), p_m1, sum_ioniz, t_final
     real(dp), allocatable      :: y(:, :), y_field(:, :)
     real(dp), allocatable      :: moved_points(:, :)
+    logical, allocatable       :: mask(:)
     logical                    :: reverse
     integer, parameter         :: nvar = 3
 
@@ -89,7 +90,7 @@ contains
 
     ! Move mesh points slightly away from domain boundaries
     call move_mesh_points_slightly(pdsim_ug, boundary_distance, &
-         move_distance, moved_points)
+         move_distance, moved_points, mask)
 
     allocate(y(pdsim_ndim+nvar, max_steps))
     allocate(y_field(pdsim_ndim, max_steps))
@@ -97,6 +98,28 @@ contains
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
     !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material)
     do n = 1, pdsim_ug%n_points
+
+       if (.not. mask(n)) then
+          ! Skip point, but set default values
+          pdsim_ug%point_data(n, i_k_integral) = 0.0_dp
+          pdsim_ug%point_data(n, i_avalanche_time) = 0.0_dp
+          pdsim_ug%point_data(n, [i_x1, i_x2, i_x3]) = 0.0_dp
+
+          pdsim_ug%point_data(n, i_alpha) = 0.0_dp
+          pdsim_ug%point_data(n, i_eta) = 0.0_dp
+          pdsim_ug%point_data(n, i_alpha_eff) = 0.0_dp
+
+          pdsim_ug%point_data(n, i_w) = 0.0_dp
+          pdsim_ug%point_data(n, i_p0) = 0.0_dp
+          pdsim_ug%point_data(n, i_p_m1) = 0.0_dp
+          pdsim_ug%point_data(n, i_kstar) = 0.0_dp
+
+          pdsim_ug%point_data(n, i_ion_time) = 0.0_dp
+          pdsim_ug%point_data(n, [i_ion_x1, i_ion_x2, i_ion_x3]) = 0.0_dp
+          pdsim_ug%point_data(n, i_ion_gamma) = 0.0_dp
+          cycle
+       end if
+
        r = moved_points(:, n)
 
        ! Trace electron avalanche
@@ -179,23 +202,23 @@ contains
 
   !> Move mesh points slightly away from domain boundaries. Other points are
   !> also slightly moved, to avoid them being exactly on a material boundary
-  subroutine move_mesh_points_slightly(ug, bdist, mdist, points)
+  subroutine move_mesh_points_slightly(ug, bdist, mdist, points, mask)
     type(iu_grid_t), intent(in)          :: ug
     !> How far points are moved from domain boundaries
     real(dp), intent(in)                 :: bdist
     !> How far other points are moved
     real(dp), intent(in)                 :: mdist
     real(dp), allocatable, intent(inout) :: points(:, :)
+    logical, allocatable, intent(inout)  :: mask(:)
 
     integer              :: n, k, i_point
     real(dp)             :: center(3), direction(3), dist
-    logical, allocatable :: moved(:)
 
     allocate(points(3, ug%n_points))
-    allocate(moved(ug%n_points))
+    allocate(mask(ug%n_points))
 
     points(:, :) = ug%points
-    moved(:) = .false.
+    mask(:) = .false.
 
     do n = 1, ug%n_cells
        ! For cells in the gas, move boundary points inwards
@@ -206,7 +229,7 @@ contains
              i_point = ug%cells(k, n)
 
              ! Move points only once
-             if (.not. moved(i_point)) then
+             if (.not. mask(i_point)) then
                 if (ug%point_is_at_boundary(i_point)) then
                    dist = bdist
                 else
@@ -216,11 +239,12 @@ contains
                 direction = center - points(:, i_point)
                 points(:, i_point) = points(:, i_point) + dist * &
                      direction / norm2(direction)
-                moved(i_point) = .true.
+                mask(i_point) = .true.
              end if
           end do
        end if
     end do
+
   end subroutine move_mesh_points_slightly
 
   !> Helper routine for integration along field lines
