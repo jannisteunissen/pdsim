@@ -307,9 +307,9 @@ contains
     real(dp), intent(out) :: t_av
 
     integer  :: n, i_step
-    real(dp) :: alpha, eta, dx, field_norm, tmp, k0, k1
+    real(dp) :: alpha, eta, dx, field_norm
     real(dp) :: f1(n_steps), f2(n_steps)
-    real(dp) :: tmp_sum(n_steps)
+    real(dp) :: tmp_sum(n_steps), threshold, fraction
 
     ! Threshold for non-zero ionization
     real(dp), parameter :: ionization_threshold = 1e-3_dp
@@ -323,7 +323,7 @@ contains
        f2(n) = eta
     end do
 
-    ! Use composite trapezoidal rule to evaluate integrals
+    ! Evaluate integrals
     w = 0.0_dp
     p_m1 = 0.0_dp
     tmp_sum(1) = 0.0_dp
@@ -331,27 +331,30 @@ contains
     do n = 1, n_steps-1
        dx = norm2(y(1:ndim, n+1) - y(1:ndim, n))
 
-       ! Assume linear variation of term inside exponential, of the form k0 +
-       ! k1 * (x - x0). Then integrate exponential term analytically.
-       k0 = y(ndim+i_Kint, n)
-       k1 = (y(ndim+i_Kint, n+1) - y(ndim+i_Kint, n))/dx
-
-       w = w + 0.5_dp * (f1(n) + f1(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
-       tmp = 0.5_dp * (f1(n) + f1(n+1)) * exp(k0) * (exp(k1*dx) - 1)/k1
-       tmp_sum(n+1) = tmp_sum(n) + tmp
-
-       k0 = y(ndim+i_Lint, n)
-       k1 = (y(ndim+i_Lint, n+1) - y(ndim+i_Lint, n))/dx
-       p_m1 = p_m1 + 0.5_dp * (f2(n) + f2(n+1)) * exp(-k0) * (1 - exp(-k1*dx))/k1
+       w = w + approx_exp_integral(-y(ndim+i_Kint, n), &
+            -y(ndim+i_Kint, n+1), f1(n), f1(n+1), dx)
+       tmp_sum(n+1) = tmp_sum(n) + approx_exp_integral(y(ndim+i_Kint, n), &
+            y(ndim+i_Kint, n+1), f1(n), f1(n+1), dx)
+       p_m1 = p_m1 + approx_exp_integral(-y(ndim+i_Lint, n), &
+            -y(ndim+i_Lint, n+1), f2(n), f2(n+1), dx)
     end do
 
     sum_ioniz = tmp_sum(n_steps)
-    i_step = findloc(tmp_sum >= 0.5_dp * sum_ioniz, .true., dim=1)
 
-    ! Estimate of median position and time where ionization was produced
     if (sum_ioniz > ionization_threshold) then
-       r_av = y(1:ndim, i_step-1)
-       t_av = y(ndim+i_travel_time, i_step-1)
+       ! Assume exponential growth, starting from 1. Then find 'center'
+       ! location where ionization is produced
+       tmp_sum = tmp_sum + 1.0_dp
+       threshold = 0.5_dp * sum_ioniz + 1.0_dp
+       i_step = findloc(tmp_sum >= threshold, .true., dim=1)
+
+       ! Assume f(x) = a * exp(x * log(b/a)), and then find f(x) = threshold.
+       fraction = log(threshold/tmp_sum(i_step-1)) / &
+            log(tmp_sum(i_step)/tmp_sum(i_step-1))
+
+       r_av = y(1:ndim, i_step-1) * (1 - fraction) + y(1:ndim, i_step) * fraction
+       t_av = y(ndim+i_travel_time, i_step-1) * (1 - fraction) + &
+            y(ndim+i_travel_time, i_step) * fraction
     else
        ! No ionization produced; take start location and time
        r_av = y(1:ndim, 1)
@@ -360,6 +363,38 @@ contains
 
     w = 1 + exp(y(ndim+i_Kint, n_steps)) * w
     p_m1 = exp(-y(ndim+i_Lint, n_steps)) + p_m1
+
+  contains
+
+    !> Approximate integral between 0 and h of exp(a*x) * b, with a and b
+    !> given at x=0 and x=h. Assume linear variation of term inside
+    !> exponential and then integrate exponential term analytically.
+    real(dp) function approx_exp_integral(a1, a2, b1, b2, dx) result(res)
+      real(dp), intent(in) :: a1, a2, b1, b2, dx
+      real(dp)             :: k0, k1, tmp
+
+      k0 = a1
+      k1 = (a2 - a1)/dx
+
+      if (abs(k1) > 0) then
+         tmp = expm1(k1*dx)/k1
+      else
+         tmp = dx
+      end if
+
+      res = 0.5_dp * (b1 + b2) * exp(k0) * tmp
+    end function approx_exp_integral
+
+    real(dp) elemental function expm1(x)
+      real(dp), intent(in) :: x
+
+      if (abs(x) < 1e-5_dp) then
+         expm1 = x + 0.5_dp * x * x
+      else
+         expm1 = exp(x) - 1.0_dp
+      end if
+    end function expm1
+
   end subroutine compute_path_integrals
 
 end module m_integral
