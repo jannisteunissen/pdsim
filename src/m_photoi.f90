@@ -41,7 +41,7 @@ contains
     call CFG_get(cfg, "photoi%enabled", photoi_enabled)
 
     frac_O2 = GAS_get_fraction("O2")
-    if (frac_O2 <= epsilon(1.0_dp)) then
+    if (frac_O2 <= epsilon(1.0_dp) .and. photoi_enabled) then
        error stop "There is no oxygen, you should disable photoionzation"
     end if
 
