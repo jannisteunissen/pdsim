@@ -4,7 +4,7 @@ LIBS := interp_unstructured particle_core
 LIBDIRS := interpolate_unstructured particle_core
 INCDIRS := interpolate_unstructured particle_core
 
-.PHONY:	all clean dependencies.make
+.PHONY:	all clean
 
 all: 	pdsim
 
