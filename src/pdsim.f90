@@ -31,13 +31,15 @@ program pdsim
   call photoi_initialize(cfg)
   call CFG_get(cfg, "simulate", what_to_simulate)
 
+  ! Always compute ionization integrals
+  if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
+  call integral_compute(cfg)
+
   select case (what_to_simulate)
      case ("integral")
-        if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
-        call integral_compute(cfg)
+        ! Already done above
+        continue
      case ("avalanches")
-        if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
-        call integral_compute(cfg)
         if (pdsim_verbosity > 0) print *, "Starting avalanche simulation"
         call avalanche_simulate(cfg)
      case ("particles")

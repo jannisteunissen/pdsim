@@ -30,18 +30,18 @@ contains
 
   subroutine particles_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
-    real(dp)                   :: dummy_real(0)
 
     call CFG_add(cfg, "particles%max_dt", 1.0e-12_dp, &
          "Maximal time step (s) for particles")
-    call CFG_add(cfg, "particles%initial_positions", dummy_real, &
-         "Given initial electron positions e.g. (x0, y0, ..., xn, yn)", &
-         dynamic_size=.true.)
+    call CFG_add(cfg, "particles%initial_position", [0.0_dp, 0.0_dp, 0.0_dp], &
+         "Initial electron position (m); in 2D, third coordinate is zero)")
+    call CFG_add(cfg, "particles%initial_energy", 0.0_dp, &
+         "Initial energy of the first electron (eV)")
     call CFG_add(cfg, "particles%n_runs", 1, &
-         "Number of runs per initial avalanche location")
+         "Number of runs")
     call CFG_add(cfg, "particles%num_electrons_inception", 1e5_dp, &
          "Assume inception takes place when there are this many electrons")
-    call CFG_add(cfg, "particles%max_eV", 500.0_dp, &
+    call CFG_add(cfg, "particles%max_energy", 500.0_dp, &
          "Max. electron energy (eV)")
     call CFG_add(cfg, "particles%cross_section_file", undefined_str, &
          "File containing electron-neutral cross sections", required=.true.)
@@ -54,7 +54,7 @@ contains
     integer                 :: n
     character(len=200)      :: cs_file
     type(CS_t), allocatable :: cross_secs(:)
-    real(dp)                :: max_eV
+    real(dp)                :: max_energy
 
     call CFG_get(cfg, "particles%cross_section_file", cs_file)
 
@@ -64,7 +64,7 @@ contains
             GAS_comp_fracs(n) * GAS_number_dens, 0.0_dp, cross_secs)
     end do
 
-    call CFG_get(cfg, "particles%max_eV", max_eV)
+    call CFG_get(cfg, "particles%max_energy", max_energy)
 
     call CFG_get(cfg, "particles%num_electrons_inception", &
          num_electrons_inception)
@@ -85,10 +85,9 @@ contains
     pc%outside_check => outside_check
 
     call pc%initialize(UC_elec_mass, 100*int(num_electrons_inception))
-    call pc%use_cross_secs(max_eV, pdsim_table_size, cross_secs)
+    call pc%use_cross_secs(max_energy, pdsim_table_size, cross_secs)
 
-    where (pc%colls(:)%type == CS_ionize_t .or. &
-         pc%colls(:)%type == CS_attach_t)
+    where (pc%colls(:)%type == CS_ionize_t)
        pc%coll_is_event(:) = .true.
     end where
 
@@ -155,8 +154,7 @@ contains
     end if
 
     avalanche_size = avalanche_size + &
-         count(pc%event_list(1:pc%n_events)%ctype == CS_ionize_t) - &
-         count(pc%event_list(1:pc%n_events)%ctype == CS_attach_t)
+         count(pc%event_list(1:pc%n_events)%ctype == CS_ionize_t)
 
     if (photoi_enabled) then
        call photoi_from_events(pc%n_events, pc%event_list, pc%rng, &
@@ -180,14 +178,13 @@ contains
   end subroutine handle_events
 
   !> Write the particle coordinates to a file that can be loaded in Visit
-  subroutine particles_write(i_step, i_run)
-    integer, intent(in)       :: i_step
+  subroutine particles_write(i_run)
     integer, intent(in)       :: i_run
     character(len=200)        :: fname
     integer                   :: my_unit, n
 
     write(fname, "(A,I0.5,A,I0.5,A)") trim(pdsim_output_name) // '_run', &
-         i_run, "_", i_step, ".3D"
+         i_run, ".3D"
 
     open(newunit=my_unit, file=trim(fname), action='write')
     write(my_unit, *) "X Y Z eV"
@@ -203,43 +200,39 @@ contains
   subroutine particles_simulate(cfg)
     type(CFG_t), intent(inout) :: cfg
 
-    real(dp), allocatable :: r_start(:, :), tmp_array(:)
-    integer, allocatable  :: avalanche_size(:, :)
-    integer               :: n_pos, n_runs, var_size
+    integer, allocatable :: avalanche_size(:)
+    real(dp)             :: r_start(3), vars(2), initial_energy
+    integer              :: n_runs, i_cell
 
     call particles_initialize(cfg)
-
-    call CFG_get_size(cfg, "particles%initial_positions", var_size)
-    if (modulo(var_size, pdsim_ndim) /= 0) &
-         error stop "particles%initial_positions has invalid size"
-    if (var_size == 0) error stop "particles%initial_positions not specified"
-    n_pos = var_size/pdsim_ndim
-
+    call CFG_get(cfg, "particles%initial_position", r_start)
     call CFG_get(cfg, "particles%n_runs", n_runs)
+    call CFG_get(cfg, "particles%initial_energy", initial_energy)
 
-    allocate(tmp_array(var_size))
-    call CFG_get(cfg, "particles%initial_positions", tmp_array)
-    r_start = reshape(tmp_array, [pdsim_ndim, n_pos])
+    allocate(avalanche_size(n_runs))
 
-    allocate(avalanche_size(n_runs, n_pos))
+    i_cell = 0
+    call iu_interpolate_at(pdsim_ug, r_start, 2, [i_p_m1, i_kstar], vars, i_cell)
 
-    call particles_simulate_avalanches(n_pos, n_runs, r_start, avalanche_size)
-    call write_avalanche_size(n_pos, n_runs, r_start, avalanche_size)
+    call particles_simulate_avalanches(n_runs, r_start, initial_energy, &
+         avalanche_size)
+    call write_avalanche_size(n_runs, r_start, avalanche_size, vars(1), vars(2))
 
   end subroutine particles_simulate
 
   !> Simulate electron avalanches (possibly with photoionization) starting
   !> from initial electrons at given locations
-  subroutine particles_simulate_avalanches(n_pos, n_runs, r_start, avalanche_size)
-    integer, intent(in)  :: n_pos
-    integer, intent(in)  :: n_runs
-    real(dp), intent(in) :: r_start(pdsim_ndim, n_pos)
-    integer, intent(out) :: avalanche_size(n_runs, n_pos)
+  subroutine particles_simulate_avalanches(n_runs, r_start, initial_energy, &
+       avalanche_size)
+    integer, intent(in)  :: n_runs !< Number of runs
+    real(dp), intent(in) :: r_start(3) !< Start location
+    real(dp), intent(in) :: initial_energy !< Energy in eV
+    integer, intent(out) :: avalanche_size(n_runs) !< Total number of ionizations
     type(PC_part_t)      :: initial_electron
-    integer              :: n_output, i_pos, i_run
+    integer              :: n_output, i_run
     integer              :: max_iterations = huge(1)
     integer              :: iteration
-    real(dp)             :: dt, time
+    real(dp)             :: dt, time, speed
     logical              :: output_particles_now
 
     ! Set properties for initial electron
@@ -247,72 +240,75 @@ contains
     initial_electron%w      = 1.0_dp
     initial_electron%t_left = 0.0_dp
     initial_electron%a(:)   = 0.0_dp
-    initial_electron%x(:)   = 0.0_dp
+    initial_electron%x      = r_start
 
-    do i_pos = 1, n_pos
-       do i_run = 1, n_runs
-          call pc%remove_particles()
+    speed = sqrt(2 * initial_energy * UC_elec_volt/UC_elec_mass)
 
-          initial_electron%x(1:pdsim_ndim) = r_start(:, i_pos)
-          call pc%add_part(initial_electron)
-          avalanche_size(i_run, i_pos) = 1
+    do i_run = 1, n_runs
+       call pc%remove_particles()
 
-          time     = 0.0_dp
-          dt       = max_dt
-          n_output = 0
+       ! Sample random direction
+       initial_electron%v(:) = pc%rng%sphere(speed)
 
-          do iteration = 1, max_iterations
-             ! Set acceleration
-             call pc%set_accel()
+       call pc%add_part(initial_electron)
+       avalanche_size(i_run) = 1
 
-             output_particles_now = (particles_output .and. &
-                  time >= n_output * particles_output_dt)
+       time     = 0.0_dp
+       dt       = max_dt
+       n_output = 0
 
-             if (output_particles_now) then
-                n_output = n_output + 1
-                call particles_write(n_output, i_pos)
-             end if
+       do iteration = 1, max_iterations
+          ! Set acceleration
+          call pc%set_accel()
 
-             call pc%advance(dt)
-             call pc%after_mover(dt)
-             call pc%clean_up()
-             time = time + dt
+          output_particles_now = (particles_output .and. &
+               time >= n_output * particles_output_dt)
 
-             call handle_events(pc, avalanche_size(i_run, i_pos))
+          if (output_particles_now) then
+             n_output = n_output + 1
+             call particles_write(n_output)
+          end if
 
-             if (pc%n_part == 0) exit
-             if (pc%n_part >= num_electrons_inception) exit
-          end do
+          call pc%advance_openmp(dt)
+          call pc%after_mover(dt)
+          call pc%clean_up()
+          time = time + dt
 
-          write(*, "(F6.1,A)") (((i_pos-1) * n_runs + i_run)*1e2_dp) / &
-               (n_pos*n_runs), "%"
+          call handle_events(pc, avalanche_size(i_run))
+
+          if (pc%n_part == 0) exit
+          if (pc%n_part >= num_electrons_inception) exit
        end do
+
+       if (modulo(i_run, ceiling(1e-2_dp * n_runs)) == 0 &
+            .and. pdsim_verbosity > 0) then
+          write(*, "(F6.1,A)") (i_run*1e2_dp)/n_runs, "%"
+       end if
     end do
 
   end subroutine particles_simulate_avalanches
 
-  subroutine write_avalanche_size(n_pos, n_runs, r_start, avalanche_size)
-    integer, intent(in)  :: n_pos
+  subroutine write_avalanche_size(n_runs, r_start, avalanche_size, &
+       p_m1, K_star)
     integer, intent(in)  :: n_runs
-    real(dp), intent(in) :: r_start(pdsim_ndim, n_pos)
-    integer, intent(in)  :: avalanche_size(n_runs, n_pos)
+    real(dp), intent(in) :: r_start(3)
+    integer, intent(in)  :: avalanche_size(n_runs)
+    real(dp), intent(in) :: p_m1
+    real(dp), intent(in) :: K_star
 
     character(len=200) :: fname
-    integer            :: my_unit, n, i_run
+    integer            :: my_unit, i_run
     real(dp)           :: r(3)
 
     write(fname, "(A,I0.5,A,I0.5,A)") trim(pdsim_output_name) // &
-         "_avalanche_size.3D"
+         "_avalanche_size.txt"
 
     open(newunit=my_unit, file=trim(fname), action="write")
-    write(my_unit, *) "X Y Z avalanche_size"
+    write(my_unit, *) p_m1, K_star, r_start
 
     r(:) = 0.0_dp
-    do n = 1, n_pos
-       do i_run = 1, n_runs
-          r(1:pdsim_ndim) = r_start(:, n)
-          write(my_unit, *) r, avalanche_size(i_run, n)
-       end do
+    do i_run = 1, n_runs
+       write(my_unit, *) avalanche_size(i_run)
     end do
 
     close(my_unit)
