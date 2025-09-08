@@ -8,6 +8,8 @@ all_gases = [
     (['N2'], [1.0], ['Phelps'], None),
     (['N2'], [1.0], ['Trinity'], None),
     (['N2'], [1.0], ['IST_Lisbon'], None),
+    (['N2'], [1.0], ['Biagi'], None),
+    (['Ar'], [1.0], ['Biagi'], None),
     (['N2', 'O2'], [0.8, 0.2], ['Phelps', 'Phelps'], 1e-6),
     (['N2', 'O2'], [0.8, 0.2], ['Phelps', 'MuroranIT'], 1.0),
     (['N2', 'O2'], [0.8, 0.2], ['Trinity', 'MuroranIT'], 1.0),
