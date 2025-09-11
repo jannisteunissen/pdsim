@@ -242,13 +242,14 @@ contains
     initial_electron%a(:)   = 0.0_dp
     initial_electron%x      = r_start
 
-    speed = sqrt(2 * initial_energy * UC_elec_volt/UC_elec_mass)
+    speed = sqrt(2/3.0_dp * initial_energy * UC_elec_volt / UC_elec_mass)
 
     do i_run = 1, n_runs
        call pc%remove_particles()
 
-       ! Sample random direction
-       initial_electron%v(:) = pc%rng%sphere(speed)
+       ! Sample random direction as a Maxwellian
+       initial_electron%v(:) = speed * [pc%rng%normal(), &
+            pc%rng%normal(), pc%rng%normal()]
 
        call pc%add_part(initial_electron)
        avalanche_size(i_run) = 1
