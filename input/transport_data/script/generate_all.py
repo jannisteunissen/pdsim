@@ -59,7 +59,7 @@ CONDITIONS
 1.        / Ion/neutral mass ratio
 0         / e-e momentum effects & modified Coulomb logarithm: 0=No&No; 1=Yes&No; 2=No&Yes; 3=Yes&Yes*
 1         / Energy sharing: 1=Equal*; 2=One takes all
-1         / Growth: 1=Temporal*; 2=Spatial; 3=Not included; 4=Grad-n expansion
+2         / Growth: 1=Temporal*; 2=Spatial; 3=Not included; 4=Grad-n expansion
 0.        / Maxwellian mean energy (eV)
 400       / # of grid points
 0         / Manual grid: 0=No; 1=Linear; 2=Parabolic
