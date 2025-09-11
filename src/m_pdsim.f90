@@ -367,6 +367,10 @@ contains
 
     call GAS_initialize(gas_components, gas_fracs, pressure, temperature)
 
+    if (pdsim_verbosity > 0) then
+       write(*, "(A,E11.3)") " Gas number density (1/m3): ", GAS_number_dens
+    end if
+
     ! Set ion mobility
     call CFG_get(cfg, "input%ion_mobility", pdsim_ion_mobility)
 
