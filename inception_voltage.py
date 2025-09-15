@@ -60,17 +60,19 @@ def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
 
 # Improve approximation of root of f with Robbins Monro method
 def Robbins_Monro(f, x0, n_steps, c_0, c_1=0., verbosity=0):
-    x = x0
+    x = np.zeros(n_steps+1)
+    x[0] = x0
+
     for n in range(1, n_steps+1):
         a = c_0 / (c_1 + n)
-        fx = f(x)
+        fx = f(x[n-1])
 
         if verbosity > 0:
             print(f'x: {x:.5e}, f(x): {fx:.5e}')
 
-        x = x - a * fx
+        x[n] = x[n-1] - a * fx
 
-    return x
+    return x[-1], x[-10:].std()
 
 
 # Scan for lowest field_scale_factor for which the inception probability
@@ -96,12 +98,20 @@ bracket, values = noisy_bisect(target_function, factor_lo, factor_hi,
                                val_lo, val_hi, 1e-3, args.verbosity)
 
 factor_estimate = 0.5 * sum(bracket)
+err = 0.5 * (bracket[1] - bracket[0])
 
-print(f'field_scale_factor estimate: {factor_estimate:.4e}')
+print(f'field_scale_factor estimate: {factor_estimate:.4e} +- {err:.1e}')
 
 if args.refine_steps > 0:
-    inv_deriv_estimate = (bracket[1] - bracket[0])/(values[1] - values[0])
-    factor_refined = Robbins_Monro(target_function, factor_estimate,
-                                   args.refine_steps, inv_deriv_estimate,
-                                   verbosity=args.verbosity)
-    print(f'field_scale_factor refined: {factor_refined:.4e}')
+    denom = values[1] - values[0]
+
+    # Avoid division by a very small value
+    if abs(denom) < args.p:
+        denom = args.p * np.sign(denom)
+
+    inv_deriv_estimate = (bracket[1] - bracket[0])/denom
+
+    factor_refined, std = Robbins_Monro(target_function, factor_estimate,
+                                        args.refine_steps, inv_deriv_estimate,
+                                        verbosity=args.verbosity)
+    print(f'field_scale_factor refined:  {factor_refined:.4e} +- {std:.1e}')
