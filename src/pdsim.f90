@@ -49,8 +49,10 @@ program pdsim
         error stop "simulate option can be integral, avalanches, particles"
   end select
 
-  call iu_write_vtk(pdsim_ug, trim(pdsim_output_name) // ".vtu")
-  if (pdsim_verbosity > 0) &
-       print *, "Wrote ", trim(pdsim_output_name) // ".vtu"
+  if (pdsim_output_level > 1) then
+     call iu_write_vtk(pdsim_ug, trim(pdsim_output_name) // ".vtu")
+     if (pdsim_verbosity > 0) &
+          print *, "Wrote ", trim(pdsim_output_name) // ".vtu"
+  end if
 
 end program pdsim

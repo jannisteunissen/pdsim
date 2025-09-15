@@ -97,6 +97,9 @@ module m_pdsim
   !> How verbose the simulations are
   integer, public, protected :: pdsim_verbosity
 
+  !> How much output is written (0 means none)
+  integer, public, protected :: pdsim_output_level
+
   !> Size for lookup tables used for interpolation
   integer, public, protected :: pdsim_table_size
 
@@ -190,6 +193,8 @@ contains
          "The base name for output files")
     call CFG_add(cfg, "output%verbosity", 1, &
          "How verbose the simulations are (higher means more output)")
+    call CFG_add(cfg, "output%level", 2, &
+         "How much output is written (0: none, 1: info, 2: all)")
     call CFG_add(cfg, "output%particles", .true., &
          "Output the simulation particles in each run")
     call CFG_add(cfg, "output%particles_dt", 1e-9_dp, &
@@ -210,11 +215,13 @@ contains
     integer                         :: n_field_comp
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
-    call check_path_writable(trim(pdsim_output_name))
-
     call CFG_get(cfg, "output%verbosity", pdsim_verbosity)
+    call CFG_get(cfg, "output%level", pdsim_output_level)
 
-    call CFG_write(cfg, trim(pdsim_output_name) // "_config.cfg")
+    if (pdsim_output_level > 0) then
+       call check_path_writable(trim(pdsim_output_name))
+       call CFG_write(cfg, trim(pdsim_output_name) // "_config.cfg")
+    end if
 
     call CFG_get(cfg, "input%mesh", mesh_file)
     call CFG_get(cfg, "input%coordinate_scale_factor", r_scale_factor)
@@ -436,8 +443,10 @@ contains
             input_interpolation, add=.true.)
     end if
 
-    call write_transport_data_summary(&
-         trim(pdsim_output_name) // "_transport_data.txt")
+    if (pdsim_output_level > 0) then
+       call write_transport_data_summary(&
+            trim(pdsim_output_name) // "_transport_data.txt")
+    end if
 
   end subroutine read_transport_data
 
