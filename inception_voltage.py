@@ -40,7 +40,7 @@ def target_function(factor):
 # Taken from: https://www.johndcook.com/blog/2012/06/14/root-finding-with-noisy-functions/
 def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
     if b-a < tolerance:
-        return (a, b)
+        return (a, b), (fa, fb)
 
     mid = 0.5 * (a+b)
     fmid = f(mid)
@@ -50,7 +50,7 @@ def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
 
     if fmid < fa or fmid > fb:
         # Monotonicity violated, reached resolution of noise
-        return (a, b)
+        return (a, b), (fa, fb)
     if fmid < 0:
         a, fa = mid, fmid
     else:
@@ -64,10 +64,11 @@ def Robbins_Monro(f, x0, n_steps, c_0, c_1=0., verbosity=0):
     for n in range(1, n_steps+1):
         a = c_0 / (c_1 + n)
         fx = f(x)
-        x = x - a * fx
 
         if verbosity > 0:
             print(f'x: {x:.5e}, f(x): {fx:.5e}')
+
+        x = x - a * fx
 
     return x
 
@@ -91,14 +92,15 @@ for factor in factors:
 if val_lo is None or val_hi is None:
     raise ValueError('The range fbound does not include a sign change')
 
-bracket = noisy_bisect(target_function, factor_lo, factor_hi,
-                       val_lo, val_hi, 1e-3, args.verbosity)
+bracket, values = noisy_bisect(target_function, factor_lo, factor_hi,
+                               val_lo, val_hi, 1e-3, args.verbosity)
+
 factor_estimate = 0.5 * sum(bracket)
 
 print(f'field_scale_factor estimate: {factor_estimate:.4e}')
 
 if args.refine_steps > 0:
-    inv_deriv_estimate = (bracket[1] - bracket[0])/args.p
+    inv_deriv_estimate = (bracket[1] - bracket[0])/(values[1] - values[0])
     factor_refined = Robbins_Monro(target_function, factor_estimate,
                                    args.refine_steps, inv_deriv_estimate,
                                    verbosity=args.verbosity)
