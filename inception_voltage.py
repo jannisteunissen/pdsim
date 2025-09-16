@@ -46,7 +46,7 @@ def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
     fmid = f(mid)
 
     if verbosity > 0:
-        print(f'factor: {mid:.5e}, p_inception - threshold: {fmid:.5e}')
+        print(f'x: {mid:12.5e}, p_inception - threshold: {fmid:.5e}')
 
     if fmid < fa or fmid > fb:
         # Monotonicity violated, reached resolution of noise
@@ -59,20 +59,27 @@ def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
 
 
 # Improve approximation of root of f with Robbins Monro method
-def Robbins_Monro(f, x0, n_steps, c_0, c_1, verbosity=0):
+def Robbins_Monro(f, x0, n_steps, inv_deriv, c_1, verbosity=0):
     x = np.zeros(n_steps+1)
+    fx = np.zeros(n_steps)
     x[0] = x0
+    n_sign_changes = 1
 
     for n in range(1, n_steps+1):
-        a = c_1 * (1 + c_1) / (n + c_1)
-        fx = f(x[n-1])
+        fx[n-1] = f(x[n-1])
+
+        if n > 2 and fx[n-1] * fx[n-2] < 0:
+            n_sign_changes += 1
+
+        a = inv_deriv * (1 + c_1) / (n_sign_changes + c_1)
 
         if verbosity > 0:
-            print(f'x: {x[n-1]:.5e}, f(x): {fx:.5e}')
+            print(f'{n:4d} x: {x[n-1]:12.5e}, f(x): {fx[n-1]:12.5e}, '
+                  f'a: {a:.3e}')
 
-        x[n] = x[n-1] - a * fx
+        x[n] = x[n-1] - a * fx[n-1]
 
-    return x[-1], x.std()
+    return x[-1], x[-n_steps//2:].std()
 
 
 # Scan for lowest field_scale_factor for which the inception probability
@@ -100,13 +107,18 @@ bracket, values = noisy_bisect(target_function, factor_lo, factor_hi,
 factor_estimate = 0.5 * sum(bracket)
 err = 0.5 * (bracket[1] - bracket[0])
 
-print(f'field_scale_factor estimate: {factor_estimate:.4e} +- {err:.1e}')
+if args.verbosity > 0:
+    print(f'factor estimate: {factor_estimate:.4e} {err:.1e}')
 
 if args.refine_steps > 0:
-    inv_deriv_est = (factor_hi - factor_lo)/(val_hi - val_lo)
+    inv_deriv_est = (factor_hi - factor_lo) / \
+        max(abs(val_hi - val_lo), args.p)
 
-    factor_refined, std = Robbins_Monro(target_function, factor_estimate,
-                                        args.refine_steps, 2*inv_deriv_est,
-                                        args.refine_steps/10,
-                                        verbosity=args.verbosity)
-    print(f'field_scale_factor refined:  {factor_refined:.4e} +- {std:.1e}')
+    factor_estimate, std = Robbins_Monro(target_function, factor_estimate,
+                                        args.refine_steps, inv_deriv_est,
+                                        0, verbosity=args.verbosity)
+
+if args.verbosity > 0:
+    print('p_threshold factor     error')
+
+print(f'{args.p:.4e}  {factor_estimate:.4e} {err:.1e}')
