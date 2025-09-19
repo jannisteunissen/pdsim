@@ -96,8 +96,14 @@ contains
     allocate(y_field(pdsim_ndim, max_steps))
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
-    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material)
+    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material) &
+    !$omp schedule(dynamic)
     do n = 1, pdsim_ug%n_points
+
+       if (modulo(n, ceiling(5e-2_dp * pdsim_ug%n_points)) == 0 .and. &
+            pdsim_verbosity > 0) then
+          write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
+       end if
 
        if (.not. mask(n)) then
           ! Skip point, but set default values

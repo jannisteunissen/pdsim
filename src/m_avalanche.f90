@@ -118,7 +118,7 @@ contains
 
     !$omp do schedule(dynamic)
     do n = 1, pdsim_ug%n_points
-       if (modulo(n, ceiling(1e-2_dp * pdsim_ug%n_points)) == 0 .and. &
+       if (modulo(n, ceiling(5e-2_dp * pdsim_ug%n_points)) == 0 .and. &
             pdsim_verbosity > 0) then
           write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
        end if
