@@ -375,7 +375,7 @@ contains
     call GAS_initialize(gas_components, gas_fracs, pressure, temperature)
 
     if (pdsim_verbosity > 0) then
-       write(*, "(A,E11.3)") " Gas number density (1/m3): ", GAS_number_dens
+       write(*, "(A,E11.3)") " Gas number density (1/m3):  ", GAS_number_dens
     end if
 
     ! Set ion mobility
@@ -475,7 +475,8 @@ contains
 
     if (n <= pdsim_tdtbl%n_points) then
        if (pdsim_verbosity > 0) then
-          write(*, "(A,2E11.3)") " Critical field (V/m): ", pdsim_tdtbl%x(n)
+          write(*, "(A,2E11.3)") " Critical field (V/m):       ", &
+               pdsim_tdtbl%x(n)
        end if
     else
        error stop "Critical not reached in input data"

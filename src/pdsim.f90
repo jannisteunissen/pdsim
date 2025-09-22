@@ -31,6 +31,11 @@ program pdsim
   call photoi_initialize(cfg)
   call CFG_get(cfg, "simulate", what_to_simulate)
 
+  if (pdsim_verbosity > 0) then
+     print *, "Number of grid points:", pdsim_ug%n_points
+     print *, "Number of grid cells: ", pdsim_ug%n_cells
+  end if
+
   ! Always compute ionization integrals
   if (pdsim_verbosity > 0) print *, "Computing ionization integrals"
   call integral_compute(cfg)

@@ -1,5 +1,6 @@
 !> Module for computing ionization integral
 module m_integral
+  use iso_fortran_env, only: int64
   use m_config
   use m_lookup_table
   use m_interp_unstructured
@@ -55,6 +56,7 @@ contains
     logical, allocatable       :: mask(:)
     logical                    :: reverse
     integer, parameter         :: nvar = 3
+    integer(int64)             :: t_start, t_end, count_rate
 
     call CFG_get(cfg, "integral%max_steps", max_steps)
     call CFG_get(cfg, "integral%rtol", rtol)
@@ -94,6 +96,8 @@ contains
 
     allocate(y(pdsim_ndim+nvar, max_steps))
     allocate(y_field(pdsim_ndim, max_steps))
+
+    call system_clock(t_start, count_rate)
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
     !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material) &
@@ -203,6 +207,13 @@ contains
 
     end do
     !$omp end parallel do
+
+    call system_clock(t_end, count_rate)
+
+    if (pdsim_verbosity > 0) then
+       write(*, "(A,E12.3)") " Time for integrals (s):", &
+            (t_end - t_start)/real(count_rate, dp)
+    end if
 
   end subroutine integral_compute
 

@@ -71,6 +71,7 @@ contains
     integer                        :: n_runs, thread_id
     integer                        :: max_photons
     integer                        :: inception_count
+    integer(int64)                 :: n_steps_total, n_steps_point
     real(dp)                       :: inception_size
     real(dp)                       :: p_avg, pvar_avg, volume
     logical                        :: trace_photons, use_antithetic
@@ -81,6 +82,7 @@ contains
     type(pqr_t)                    :: pq
     type(rng_t)                    :: rng
     type(prng_t)                   :: prng
+    integer(int64)                 :: t_start, t_end, count_rate
 
     call iu_reserve_point_data_storage(pdsim_ug, 3)
     call iu_add_point_data(pdsim_ug, "inception_time", i_inception_time)
@@ -109,14 +111,16 @@ contains
     call rng%set_random_seed()
     call prng%init_parallel(omp_get_max_threads(), rng)
 
-    !$omp parallel private(n, thread_id, pq, avalanches, &
-    !$omp &inception_probability, inception_time, inception_pvar)
+    !$omp parallel private(n, thread_id, pq, avalanches, n_steps_point, &
+    !$omp inception_probability, inception_time, inception_pvar)
 
     ! Get a random number generator for each thread
     thread_id = omp_get_thread_num() + 1
     rng = prng%rngs(thread_id)
+    n_steps_total = 0
 
-    !$omp do schedule(dynamic)
+    call system_clock(t_start, count_rate)
+    !$omp do schedule(dynamic) reduction(+:n_steps_total)
     do n = 1, pdsim_ug%n_points
        if (modulo(n, ceiling(5e-2_dp * pdsim_ug%n_points)) == 0 .and. &
             pdsim_verbosity > 0) then
@@ -125,14 +129,18 @@ contains
 
        call run_avalanches(n, n_runs, inception_count, inception_size, &
             max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-            inception_probability, inception_time, inception_pvar)
+            inception_probability, inception_time, inception_pvar, &
+            n_steps_point)
 
+       n_steps_total = n_steps_total + n_steps_point
        pdsim_ug%point_data(n, i_inception_time) = inception_time
        pdsim_ug%point_data(n, i_inception_prob) = inception_probability
        pdsim_ug%point_data(n, i_inception_pvar) = inception_pvar
     end do
     !$omp end do
     !$omp end parallel
+    call system_clock(t_end, count_rate)
+
 
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
          pdsim_axisymmetric, 1, p_avg, volume)
@@ -140,11 +148,14 @@ contains
          pdsim_axisymmetric, 2, pvar_avg, volume)
 
     if (pdsim_verbosity > 0) then
-       write(*, "(A,E11.3)") " Average inception probability: ", p_avg
-       write(*, "(A,E11.3)") " Standard deviation bound: ", sqrt(pvar_avg)
-       write(*, "(A,E12.4)") " Total volume of gas: ", volume
+       write(*, "(A,E12.4)") " Average inception probability: ", p_avg
+       write(*, "(A,E12.4)") " Standard deviation bound:      ", sqrt(pvar_avg)
+       write(*, "(A,E12.4)") " Total volume of gas:           ", volume
+       write(*, "(A,I0)")    " Total number of steps taken:     ", n_steps_total
+       write(*, "(A,E12.4)") " Time for avalanches (s):       ", &
+            (t_end - t_start)/real(count_rate, dp)
     else
-       write(*, "(3E11.3)") p_avg, sqrt(pvar_avg), volume
+       write(*, "(3E12.4)") p_avg, sqrt(pvar_avg), volume
     end if
 
   end subroutine avalanche_simulate
@@ -152,7 +163,7 @@ contains
   !> Run n_runs avalanches starting at a point
   subroutine run_avalanches(ip, n_runs_max, inception_count, inception_size, &
        max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-       inception_probability, inception_time, inception_pvar)
+       inception_probability, inception_time, inception_pvar, n_steps_point)
     integer, intent(in)              :: ip !< Point index
     integer, intent(in)              :: n_runs_max
     integer, intent(in)              :: inception_count
@@ -166,6 +177,7 @@ contains
     real(dp), intent(out) :: inception_probability
     real(dp), intent(out) :: inception_time
     real(dp), intent(out) :: inception_pvar
+    integer(int64), intent(out) :: n_steps_point
 
     logical             :: inception(n_runs_max)
     real(dp)            :: t_inception(n_runs_max)
@@ -180,6 +192,7 @@ contains
 
     inception(:) = .false.
     t_inception(:) = 0.0_dp
+    n_steps_point = 0
 
     ! Parameters for the initial avalanche
     r = pdsim_ug%points(:, ip)
@@ -255,6 +268,8 @@ contains
           ! Store inception time
           t_inception(i_run) = time
        end if
+
+       n_steps_point = n_steps_point + i_step
     end do
 
     if (n_runs > 0) then
