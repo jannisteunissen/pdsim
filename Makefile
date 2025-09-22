@@ -1,5 +1,5 @@
 F90 := gfortran
-FFLAGS := -O2 -g -std=f2008 -fopenmp -Wall -Wextra -J build -fcheck=all
+FFLAGS := -O2 -g -std=f2008 -fopenmp -Wall -Wextra -J build
 LIBS := interp_unstructured particle_core
 LIBDIRS := interpolate_unstructured particle_core
 INCDIRS := interpolate_unstructured particle_core
