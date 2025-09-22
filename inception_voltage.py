@@ -39,14 +39,14 @@ def target_function(factor):
 # Assume a < b, fa = f(a) < 0, fb = f(b) > 0.
 # Taken from: https://www.johndcook.com/blog/2012/06/14/root-finding-with-noisy-functions/
 def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
-    if b-a < tolerance:
+    if abs(b-a) < tolerance:
         return (a, b), (fa, fb)
 
     mid = 0.5 * (a+b)
     fmid = f(mid)
 
     if verbosity > 0:
-        print(f'x: {mid:12.5e}, p_inception - threshold: {fmid:.5e}')
+        print(f'Bisect x: {mid:12.5e}, f(x): {fmid:.5e}')
 
     if fmid < fa or fmid > fb:
         # Monotonicity violated, reached resolution of noise
@@ -82,13 +82,21 @@ def Robbins_Monro(f, x0, n_steps, inv_deriv, c_1, verbosity=0):
     return x[-1], x[-n_steps//2:].std()
 
 
+if args.fbound[0] * args.fbound[1] < 0:
+    raise ValueError('fbound[0] and fbound[1] should have the same sign')
+
 # Scan for lowest field_scale_factor for which the inception probability
 # exceeds the threshold
-factors = np.linspace(args.fbound[0], args.fbound[1], args.initial_steps)
+sign = np.sign(args.fbound[0] + args.fbound[1])
+a, b = sign * np.min(np.abs(args.fbound)), sign * np.max(np.abs(args.fbound))
+factors = np.linspace(a, b, args.initial_steps)
 val_lo, val_hi = None, None
 
 for factor in factors:
     val = target_function(factor)
+
+    if args.verbosity > 0:
+        print(f'Scanning x: {factor:.4e}, f(x): {val:.4e}')
 
     if val < 0:
         factor_lo = factor
