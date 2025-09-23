@@ -32,8 +32,8 @@ program pdsim
   call CFG_get(cfg, "simulate", what_to_simulate)
 
   if (pdsim_verbosity > 0) then
-     print *, "Number of grid points:", pdsim_ug%n_points
-     print *, "Number of grid cells: ", pdsim_ug%n_cells
+     write(*, "(A,I0)") " Number of grid points:        ", pdsim_ug%n_points
+     write(*, "(A,I0)") " Number of grid cells:         ", pdsim_ug%n_cells
   end if
 
   ! Always compute ionization integrals

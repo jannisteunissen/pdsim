@@ -57,6 +57,8 @@ contains
          "Inception occurs when an avalanche of at least this size occurs")
     call CFG_add(cfg, "avalanche%trace_photons", .false., &
          "Whether to trace photon paths")
+    call CFG_add(cfg, "avalanche%limit_photoelectrons", .true., &
+         "Limit number of photoelectrons produced by a single avalanche")
     call CFG_add(cfg, "avalanche%photoemission_boundary_distance", 1e-9_dp, &
          "Produce photoemission this distance away from the boundary (m)")
 
@@ -75,6 +77,7 @@ contains
     real(dp)                       :: inception_size
     real(dp)                       :: p_avg, pvar_avg, volume
     logical                        :: trace_photons, use_antithetic
+    logical                        :: limit_photoelectrons
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp)                       :: inception_time
     real(dp)                       :: inception_probability
@@ -95,6 +98,7 @@ contains
     call CFG_get(cfg, "avalanche%inception_count", inception_count)
     call CFG_get(cfg, "avalanche%inception_size", inception_size)
     call CFG_get(cfg, "avalanche%trace_photons", trace_photons)
+    call CFG_get(cfg, "avalanche%limit_photoelectrons", limit_photoelectrons)
     call CFG_get(cfg, "avalanche%photoemission_boundary_distance", &
          photoemission_boundary_distance)
 
@@ -128,9 +132,9 @@ contains
        end if
 
        call run_avalanches(n, n_runs, inception_count, inception_size, &
-            max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-            inception_probability, inception_time, inception_pvar, &
-            n_steps_point)
+            max_photons, trace_photons, limit_photoelectrons, use_antithetic, &
+            rng, pq, avalanches, inception_probability, inception_time, &
+            inception_pvar, n_steps_point)
 
        n_steps_total = n_steps_total + n_steps_point
        pdsim_ug%point_data(n, i_inception_time) = inception_time
@@ -162,14 +166,16 @@ contains
 
   !> Run n_runs avalanches starting at a point
   subroutine run_avalanches(ip, n_runs_max, inception_count, inception_size, &
-       max_photons, trace_photons, use_antithetic, rng, pq, avalanches, &
-       inception_probability, inception_time, inception_pvar, n_steps_point)
+       max_photons, trace_photons, limit_photoelectrons, use_antithetic, rng, &
+       pq, avalanches, inception_probability, inception_time, inception_pvar, &
+       n_steps_point)
     integer, intent(in)              :: ip !< Point index
     integer, intent(in)              :: n_runs_max
     integer, intent(in)              :: inception_count
     real(dp), intent(in)             :: inception_size
     integer, intent(in)              :: max_photons
     logical, intent(in)              :: trace_photons
+    logical, intent(in)              :: limit_photoelectrons
     logical, intent(in)              :: use_antithetic
     type(rng_t), intent(inout)       :: rng
     type(pqr_t), intent(inout)       :: pq
@@ -244,8 +250,8 @@ contains
           end if
 
           if (photoi_enabled) then
-             call photoi_SEE(av, time, max_photons, &
-                  trace_photons, inception_count, rng, avalanches, pq)
+             call photoi_SEE(av, time, max_photons, trace_photons, &
+                  limit_photoelectrons, inception_count, rng, avalanches, pq)
 
              if (pq%n_stored >= inception_count) then
                 inception(i_run) = .true.
@@ -296,11 +302,12 @@ contains
   !> Sample photoionization secondary electron emission from an avalanche and
   !> store the resulting new avalanches
   subroutine photoi_SEE(av, time, max_photons, trace_photons, &
-       inception_count, rng, avalanches, pq)
+       limit_photoelectrons, inception_count, rng, avalanches, pq)
     type(avalanche_t), intent(in)    :: av
     real(dp), intent(in)             :: time
     integer, intent(in)              :: max_photons
     logical, intent(in)              :: trace_photons
+    logical, intent(in)              :: limit_photoelectrons
     integer, intent(in)              :: inception_count
     type(rng_t), intent(inout)       :: rng
     type(avalanche_t), intent(inout) :: avalanches(:)
@@ -308,6 +315,7 @@ contains
 
     real(dp) :: absorption_locations(3, max_photons)
     integer  :: k, n_photons, i_cell, i_start, status, n_steps, material
+    integer  :: n_stored_limit
     real(dp) :: r(3), r_p(3), vars(n_vars), dvec(3), gamma
 
     ! Subtract one since initial ionization does not produce photons
@@ -316,6 +324,14 @@ contains
          n_photons, absorption_locations)
 
     if (n_photons == 0) return
+
+    if (limit_photoelectrons) then
+       ! Limit for number of stored avalanches. Prevents a single avalanche
+       ! from producing so many photons that the inception criterion is met.
+       n_stored_limit = min(inception_count, pq%n_stored + inception_count/2)
+    else
+       n_stored_limit = inception_count
+    end if
 
     if (trace_photons) then
        ! Get start location
@@ -356,7 +372,7 @@ contains
              end if
 
              if (rng%unif_01() < gamma) then
-                ! Create electron due slightly away from boundary
+                ! Create electron slightly away from boundary
                 dvec = av%r_arrival - r_p
                 r = r_p + photoemission_boundary_distance * dvec / norm2(dvec)
 
@@ -366,12 +382,12 @@ contains
                 call add_new_avalanche(rng, time, r, vars, avalanches, pq)
 
                 ! Exit when the inception threshold has been reached
-                if (pq%n_stored == inception_count) exit
+                if (pq%n_stored == n_stored_limit) exit
              end if
           end if
 
           ! Exit when the inception threshold has been reached
-          if (pq%n_stored == inception_count) exit
+          if (pq%n_stored == n_stored_limit) exit
        end do
     else
        ! No photon tracing
@@ -390,7 +406,7 @@ contains
                 call add_new_avalanche(rng, time, r, vars, avalanches, pq)
 
                 ! Exit when the inception threshold has been reached
-                if (pq%n_stored == inception_count) exit
+                if (pq%n_stored == n_stored_limit) exit
              end if
           end if
        end do
