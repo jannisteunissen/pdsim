@@ -9,8 +9,8 @@ import os
 p = argparse.ArgumentParser(
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     description='Utility to find the approximate inception voltage')
-p.add_argument('cfg', type=str, help='Config file')
-p.add_argument('-p', type=float, default=1e-3,
+p.add_argument('cfgs', type=str, nargs='+', help='Config file(s)')
+p.add_argument('-p', type=float, default=1e-4,
                help='Threshold inception probability')
 p.add_argument('-fbound', type=float, nargs=2, required=True,
                help='Bounds for the field scale factor')
@@ -18,6 +18,8 @@ p.add_argument('-initial_steps', type=int, default=10,
                help='Number of steps for initial search')
 p.add_argument('-refine_steps', type=int, default=0,
                help='Refine for this number of steps')
+p.add_argument('-n_runs', type=int, default=10,
+               help='Use this number of runs per start location')
 p.add_argument('-verbosity', type=int, default=0,
                help='How much information to print')
 args = p.parse_args()
@@ -27,10 +29,15 @@ args = p.parse_args()
 def target_function(factor):
     this_folder = pathlib.Path(__file__).parent.resolve()
     pdsim_executable = os.path.join(this_folder, 'pdsim')
-    proc = subprocess.run([pdsim_executable, args.cfg,
-                           r'-output%verbosity=0',
-                           r'-output%level=0',
-                           r'-input%field_scale_factor=' + f'{factor}'],
+
+    other_args = [
+        r'-output%verbosity=0',
+        r'-output%level=0',
+        r'-avalanche%n_runs=' + f'{args.n_runs}',
+        r'-input%field_scale_factor=' + f'{factor}'
+    ]
+
+    proc = subprocess.run([pdsim_executable] + args.cfgs + other_args,
                           capture_output=True, check=True)
     p_inception, _, _ = map(float, proc.stdout.split())
     return p_inception - args.p
@@ -59,7 +66,8 @@ def noisy_bisect(f, a, b, fa, fb, tolerance, verbosity=0):
 
 
 # Improve approximation of root of f with Robbins Monro method
-def Robbins_Monro(f, x0, n_steps, inv_deriv, c_1, verbosity=0):
+def Robbins_Monro(f, x0, n_steps, inv_deriv, c_1, verbosity=0,
+                  fx_abs_limit=None):
     x = np.zeros(n_steps+1)
     fx = np.zeros(n_steps)
     x[0] = x0
@@ -76,6 +84,10 @@ def Robbins_Monro(f, x0, n_steps, inv_deriv, c_1, verbosity=0):
         if verbosity > 0:
             print(f'{n:4d} x: {x[n-1]:12.5e}, f(x): {fx[n-1]:12.5e}, '
                   f'a: {a:.3e}')
+
+        if fx_abs_limit is not None:
+            # Limit magnitude. Can be helpful for asymmetric functions
+            fx[n-1] = np.clip(fx[n-1], -fx_abs_limit, fx_abs_limit)
 
         x[n] = x[n-1] - a * fx[n-1]
 
@@ -124,7 +136,8 @@ if args.refine_steps > 0:
 
     factor_estimate, std = Robbins_Monro(target_function, factor_estimate,
                                         args.refine_steps, inv_deriv_est,
-                                        0, verbosity=args.verbosity)
+                                        0, verbosity=args.verbosity,
+                                        fx_abs_limit=2*args.p)
 
 if args.verbosity > 0:
     print('p_threshold factor     error')
