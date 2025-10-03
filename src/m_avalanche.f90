@@ -106,6 +106,10 @@ contains
     call CFG_get(cfg, "avalanche%photoemission_boundary_distance", &
          photoemission_boundary_distance)
 
+    if (use_early_exit .and. .not. omp_get_cancellation()) then
+       error stop "Set environment variable OMP_CANCELLATION to true"
+    end if
+
     allocate(avalanches(inception_count))
 
     ! Set module-level variable
@@ -153,13 +157,18 @@ contains
     !$omp end parallel
     call system_clock(t_end, count_rate)
 
-
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
          pdsim_axisymmetric, 1, p_avg, volume)
     call pdsim_pointdata_average(pdsim_ug, i_inception_pvar, &
          pdsim_axisymmetric, 2, pvar_avg, volume)
 
     if (pdsim_verbosity > 0) then
+       if (use_early_exit .and. p_avg > 0) then
+          print *, "The simulation was stopped after detecting inception"
+       else
+          print *, "The simulation completed without detecting inception"
+       end if
+
        write(*, "(A,E12.4)") " Average inception probability: ", p_avg
        write(*, "(A,E12.4)") " Standard deviation bound:      ", sqrt(pvar_avg)
        write(*, "(A,E12.4)") " Total volume of gas:           ", volume
