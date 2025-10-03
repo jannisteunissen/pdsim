@@ -20,10 +20,12 @@ parser.add_argument('-axes_triad', action='store_true',
                     help='Show axes triad')
 parser.add_argument('-mesh_color', type=str, default='gray',
                     help='Color for the mesh')
+parser.add_argument('-mesh_line_width', type=float, default=1.0,
+                    help='Line width for mesh')
 parser.add_argument('-mesh_style', type=str, default='surface',
                     help='Style of the mesh')
 parser.add_argument('-line_width', type=float, default=1.0,
-                    help='Line width')
+                    help='General line width')
 parser.add_argument('-window_size', type=int, nargs=2, default=[1024, 768],
                     help='Size of the plot (in pixels)')
 parser.add_argument('-savefig', type=str,
@@ -46,12 +48,20 @@ parser.add_argument('-slice_normal', type=float, nargs=3,
                     help='Slice using this normal direction')
 parser.add_argument('-slice_orthogonal', action='store_true',
                     help='Apply an orthogonal slice')
-parser.add_argument('-multi_samples', type=int,
+parser.add_argument('-contour', type=float, nargs='+',
+                    help='Add contour at these levels')
+parser.add_argument('-contour_color', type=str, default='white',
+                    help='Color for contours')
+parser.add_argument('-multi_samples', type=int, default=32,
                     help='Number of multisamples for MSAA anti-aliasing')
 parser.add_argument('-show_boundary', action='store_true',
                     help='Show boundary of the mesh')
 parser.add_argument('-ruler', type=float, nargs=6,
                     help='Start and end position of ruler')
+parser.add_argument('-ruler_label_format', type=str, default='%.1f',
+                    help='Label format for ruler')
+parser.add_argument('-ruler_font_size_factor', type=float, default=0.8,
+                    help='Font size scale factor for ruler')
 parser.add_argument('-distance_unit', type=str, default='mm',
                     choices=['mm', 'cm', 'm'],
                     help='Distance unit to use')
@@ -81,6 +91,7 @@ parser.add_argument('-font_label_size', type=int, default=20,
                     help='Label font size')
 parser.add_argument('-font_color', type=str, default='white',
                     help='Font color')
+
 parser.add_argument('-print_info', action='store_true',
                     help='Print information about the mesh')
 args = parser.parse_args()
@@ -127,7 +138,7 @@ elif args.slice_orthogonal:
 
 pl.add_mesh(mesh, show_edges=args.mesh, show_scalar_bar=False,
             edge_color=args.mesh_color, style=args.mesh_style,
-            line_width=args.line_width)
+            line_width=args.mesh_line_width)
 
 if args.var is not None and not args.cbar_hide:
     pl.add_scalar_bar(title=args.cbar_title, n_labels=args.cbar_n_labels)
@@ -136,7 +147,12 @@ if args.var is not None and not args.cbar_hide:
 
 pl.enable_parallel_projection()
 pl.view_vector(args.view_vector, args.view_up)
-pl.enable_anti_aliasing('msaa', multi_samples=64)
+pl.enable_anti_aliasing('msaa', multi_samples=args.multi_samples)
+
+if args.contour is not None:
+    contour = mesh.contour(args.contour)
+    pl.add_mesh(contour, color=args.contour_color,
+                line_width=args.line_width)
 
 if args.show_boundary:
     bnd = mesh.extract_feature_edges(boundary_edges=True,
@@ -153,10 +169,13 @@ if args.ruler is not None:
     scale_factors = {'mm': 1e3, 'cm': 1e2, 'm': 1.0}
     pl.add_ruler(args.ruler[0:3], args.ruler[3:],
                  title=args.distance_unit,
+                 label_format=args.ruler_label_format,
+                 font_size_factor=args.ruler_font_size_factor,
                  scale=scale_factors[args.distance_unit])
 
 if args.title is not None:
-    pl.add_text(args.title, position=args.title_position)
+    pl.add_text(args.title, position=args.title_position,
+                font_size=args.font_size)
 
 if args.zoom is not None:
     pl.camera.zoom(args.zoom)
