@@ -391,7 +391,7 @@ contains
     max_field = xx(size(xx))
     yy = yy / GAS_number_dens
     pdsim_tdtbl = LT_create(0.0_dp, max_field, pdsim_table_size, pdsim_ncols, &
-         xspacing)
+         xspacing, extrapolate_above=.true.)
     call table_set_column(pdsim_tdtbl, pdsim_col_mu, xx, yy, &
          input_interpolation)
 
