@@ -309,9 +309,6 @@ contains
     call CFG_get(cfg, "input%photoemission_gamma", pdsim_photoemission_gamma)
     pdsim_photoemission_enabled = (maxval(pdsim_photoemission_gamma) > 0.0_dp)
 
-    if (maxval(pdsim_photoemission_gamma) > 1) &
-         error stop "input%photoemission_gamma should be <= 1.0"
-
     call read_transport_data(cfg)
 
   end subroutine pdsim_initialize
