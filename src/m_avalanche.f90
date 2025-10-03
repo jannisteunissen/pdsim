@@ -49,6 +49,8 @@ contains
          "Number of runs per initial avalanche location")
     call CFG_add(cfg, "avalanche%use_antithetic", .true., &
          "Whether to use antithetic variates to reduce variance")
+    call CFG_add(cfg, "avalanche%use_early_exit", .false., &
+         "Exit after finding point with non-zero inception probability")
     call CFG_add(cfg, "avalanche%max_photons", 100*1000, &
          "Maximum number of photons produced by a single avalanche")
     call CFG_add(cfg, "avalanche%inception_count", 1000, &
@@ -78,6 +80,7 @@ contains
     real(dp)                       :: p_avg, pvar_avg, volume
     logical                        :: trace_photons, use_antithetic
     logical                        :: limit_photoelectrons
+    logical                        :: use_early_exit
     type(avalanche_t), allocatable :: avalanches(:)
     real(dp)                       :: inception_time
     real(dp)                       :: inception_probability
@@ -95,6 +98,7 @@ contains
     call CFG_get(cfg, "avalanche%max_photons", max_photons)
     call CFG_get(cfg, "avalanche%n_runs", n_runs)
     call CFG_get(cfg, "avalanche%use_antithetic", use_antithetic)
+    call CFG_get(cfg, "avalanche%use_early_exit", use_early_exit)
     call CFG_get(cfg, "avalanche%inception_count", inception_count)
     call CFG_get(cfg, "avalanche%inception_size", inception_size)
     call CFG_get(cfg, "avalanche%trace_photons", trace_photons)
@@ -124,7 +128,7 @@ contains
     n_steps_total = 0
 
     call system_clock(t_start, count_rate)
-    !$omp do schedule(dynamic) reduction(+:n_steps_total)
+    !$omp do schedule(dynamic) reduction(+:n_steps_total) 
     do n = 1, pdsim_ug%n_points
        if (modulo(n, ceiling(5e-2_dp * pdsim_ug%n_points)) == 0 .and. &
             pdsim_verbosity > 0) then
@@ -140,6 +144,10 @@ contains
        pdsim_ug%point_data(n, i_inception_time) = inception_time
        pdsim_ug%point_data(n, i_inception_prob) = inception_probability
        pdsim_ug%point_data(n, i_inception_pvar) = inception_pvar
+
+       if (use_early_exit .and. inception_probability > 0) then
+          !$omp cancel do
+       end if
     end do
     !$omp end do
     !$omp end parallel
@@ -314,8 +322,8 @@ contains
     type(pqr_t), intent(inout)       :: pq
 
     real(dp) :: absorption_locations(3, max_photons)
-    integer  :: k, n_photons, i_cell, i_start, status, n_steps, material
-    integer  :: n_stored_limit
+    integer  :: k, n, n_photons, i_cell, i_start, status, n_steps, material
+    integer  :: n_stored_limit, n_photoemission
     real(dp) :: r(3), r_p(3), vars(n_vars), dvec(3), gamma
 
     ! Subtract one since initial ionization does not produce photons
@@ -371,7 +379,9 @@ contains
                 gamma = pdsim_photoemission_gamma(1)
              end if
 
-             if (rng%unif_01() < gamma) then
+             n_photoemission = rng%poisson(gamma)
+
+             if (n_photoemission > 0) then
                 ! Create electron slightly away from boundary
                 dvec = av%r_arrival - r_p
                 r = r_p + photoemission_boundary_distance * dvec / norm2(dvec)
@@ -379,10 +389,11 @@ contains
                 call iu_interpolate_at(pdsim_ug, r, n_vars, &
                      i_vars, vars, i_cell)
 
-                call add_new_avalanche(rng, time, r, vars, avalanches, pq)
-
-                ! Exit when the inception threshold has been reached
-                if (pq%n_stored == n_stored_limit) exit
+                do n = 1, n_photoemission
+                   call add_new_avalanche(rng, time, r, vars, avalanches, pq)
+                   ! Exit when the inception threshold has been reached
+                   if (pq%n_stored == n_stored_limit) exit
+                end do
              end if
           end if
 
