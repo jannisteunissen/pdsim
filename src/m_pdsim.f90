@@ -46,12 +46,6 @@ module m_pdsim
   !> Point data: K integral
   integer, public :: i_k_integral
 
-  !> Point data: Kendall w-function
-  integer, public :: i_w
-
-  !> Point data: Kendall P(n_electron=0)
-  integer, public :: i_p0
-
   !> Point data: Ionization coefficient
   integer, public :: i_alpha
 

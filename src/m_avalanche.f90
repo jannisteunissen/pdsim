@@ -106,8 +106,10 @@ contains
     call CFG_get(cfg, "avalanche%photoemission_boundary_distance", &
          photoemission_boundary_distance)
 
-    if (use_early_exit .and. .not. omp_get_cancellation()) then
-       error stop "Set environment variable OMP_CANCELLATION to true"
+    if (use_early_exit) then
+       if (.not. omp_get_cancellation()) then
+          error stop "Set environment variable OMP_CANCELLATION to true"
+       end if
     end if
 
     allocate(avalanches(inception_count))

@@ -66,12 +66,9 @@ contains
     call CFG_get(cfg, "integral%boundary_distance", boundary_distance)
     call CFG_get(cfg, "integral%move_distance", move_distance)
 
-    call iu_reserve_point_data_storage(pdsim_ug, 17)
+    call iu_reserve_point_data_storage(pdsim_ug, 15)
 
     call iu_add_point_data(pdsim_ug, "K_integral", i_k_integral)
-    call iu_add_point_data(pdsim_ug, "avalanche_p0", i_p0)
-    call iu_add_point_data(pdsim_ug, "avalanche_w", i_w)
-
     call iu_add_point_data(pdsim_ug, "alpha", i_alpha)
     call iu_add_point_data(pdsim_ug, "eta", i_eta)
     call iu_add_point_data(pdsim_ug, "alpha_eff", i_alpha_eff)
@@ -119,8 +116,6 @@ contains
           pdsim_ug%point_data(n, i_eta) = 0.0_dp
           pdsim_ug%point_data(n, i_alpha_eff) = 0.0_dp
 
-          pdsim_ug%point_data(n, i_w) = 0.0_dp
-          pdsim_ug%point_data(n, i_p0) = 0.0_dp
           pdsim_ug%point_data(n, i_p_m1) = 0.0_dp
           pdsim_ug%point_data(n, i_kstar) = 0.0_dp
 
@@ -165,8 +160,8 @@ contains
        pdsim_ug%point_data(n, i_eta) = td(pdsim_col_eta)
        pdsim_ug%point_data(n, i_alpha_eff) = td(pdsim_col_alpha) - td(pdsim_col_eta)
 
-       pdsim_ug%point_data(n, i_w) = w
-       pdsim_ug%point_data(n, i_p0) = 1 - exp(y(pdsim_ndim+i_Kint, n_steps))/w
+       ! pdsim_ug%point_data(n, i_w) = w
+       ! pdsim_ug%point_data(n, i_p0) = 1 - exp(y(pdsim_ndim+i_Kint, n_steps))/w
        pdsim_ug%point_data(n, i_p_m1) = p_m1
        pdsim_ug%point_data(n, i_kstar) = log(1 + sum_ioniz)
 
