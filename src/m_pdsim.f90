@@ -151,6 +151,8 @@ contains
     call CFG_add(cfg, "input%field_component_names", [undefined_str], &
          "Names of the electric field components stored as point data", &
          dynamic_size=.true., required=.true.)
+    call CFG_add(cfg, "input%potential_name", undefined_str, &
+         "Optional: name of electric potential, scaled by field_scale_factor")
     call CFG_add(cfg, "input%material_name", undefined_str, &
          "Variable describing the material (point or cell data), or NONE", &
          required=.true.)
@@ -204,9 +206,9 @@ contains
     ! Mesh related parameters
     character(len=200)              :: mesh_file
     real(dp)                        :: r_scale_factor, E_scale_factor
-    character(len=120)              :: material_name
+    character(len=120)              :: material_name, potential_name
     character(len=120), allocatable :: field_component_names(:)
-    integer                         :: n_field_comp
+    integer                         :: n_field_comp, i_potential
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
     call CFG_get(cfg, "output%verbosity", pdsim_verbosity)
@@ -224,6 +226,7 @@ contains
     pdsim_ndim = iu_ndim_cell_type(pdsim_ug%cell_type)
 
     call CFG_get(cfg, "input%material_name", material_name)
+    call CFG_get(cfg, "input%potential_name", potential_name)
     call CFG_get(cfg, "input%lookup_table_size", pdsim_table_size)
 
     call store_material_data(pdsim_ug, trim(material_name), &
@@ -263,6 +266,12 @@ contains
     if (abs(E_scale_factor - 1.0_dp) > 0) then
        pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp)) = E_scale_factor * &
             pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp))
+
+       if (potential_name /= undefined_str) then
+          call iu_get_point_data_index(pdsim_ug, trim(potential_name), i_potential)
+          pdsim_ug%point_data(:, i_potential) = E_scale_factor * &
+               pdsim_ug%point_data(:, i_potential)
+       end if
     end if
 
     call CFG_get(cfg, "input%axisymmetric", pdsim_axisymmetric)
