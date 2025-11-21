@@ -63,6 +63,10 @@ contains
          "Limit number of photoelectrons produced by a single avalanche")
     call CFG_add(cfg, "avalanche%photoemission_boundary_distance", 1e-9_dp, &
          "Produce photoemission this distance away from the boundary (m)")
+    call CFG_add(cfg, "avalanche%r_min", [-1e100_dp, -1e100_dp, -1e100_dp], &
+         "Only start avalanches in a box between r_min and r_max")
+    call CFG_add(cfg, "avalanche%r_max", [1e100_dp, 1e100_dp, 1e100_dp], &
+         "Only start avalanches in a box between r_min and r_max")
 
   end subroutine avalanche_create_config
 
@@ -78,10 +82,12 @@ contains
     integer(int64)                 :: n_steps_total, n_steps_point
     real(dp)                       :: inception_size
     real(dp)                       :: p_avg, pvar_avg, volume
+    real(dp)                       :: r_min(3), r_max(3)
     logical                        :: trace_photons, use_antithetic
     logical                        :: limit_photoelectrons
     logical                        :: use_early_exit
     type(avalanche_t), allocatable :: avalanches(:)
+    logical, allocatable           :: skip_point(:)
     real(dp)                       :: inception_time
     real(dp)                       :: inception_probability
     real(dp)                       :: inception_pvar
@@ -105,6 +111,8 @@ contains
     call CFG_get(cfg, "avalanche%limit_photoelectrons", limit_photoelectrons)
     call CFG_get(cfg, "avalanche%photoemission_boundary_distance", &
          photoemission_boundary_distance)
+    call CFG_get(cfg, "avalanche%r_min", r_min)
+    call CFG_get(cfg, "avalanche%r_max", r_max)
 
     if (use_early_exit) then
        if (.not. omp_get_cancellation()) then
@@ -113,6 +121,12 @@ contains
     end if
 
     allocate(avalanches(inception_count))
+    allocate(skip_point(pdsim_ug%n_points))
+
+    do n = 1, pdsim_ug%n_points
+       skip_point(n) = any(pdsim_ug%points(:, n) < r_min .or. &
+            pdsim_ug%points(:, n) > r_max)
+    end do
 
     ! Set module-level variable
     i_vars = [i_p_m1, i_kstar, i_avalanche_time, i_x1, i_x2, i_x3, &
@@ -139,6 +153,13 @@ contains
        if (modulo(n, ceiling(5e-2_dp * pdsim_ug%n_points)) == 0 .and. &
             pdsim_verbosity > 0) then
           write(*, "(F6.1,A)") (n*1e2_dp)/pdsim_ug%n_points, "%"
+       end if
+
+       if (skip_point(n)) then
+          pdsim_ug%point_data(n, i_inception_time) = 0.0_dp
+          pdsim_ug%point_data(n, i_inception_prob) = 0.0_dp
+          pdsim_ug%point_data(n, i_inception_pvar) = 0.0_dp
+          cycle
        end if
 
        call run_avalanches(n, n_runs, inception_count, inception_size, &
