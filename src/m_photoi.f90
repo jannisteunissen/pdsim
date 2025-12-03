@@ -92,7 +92,7 @@ contains
     end select
 
     call CFG_get(cfg, "photoi%efficiency", pi_efficiency)
-    print *, pi_quench_fac
+
   end subroutine photoi_initialize
 
   subroutine photoi_from_events(n_events, events, rng, photo_pos, n_photons)
