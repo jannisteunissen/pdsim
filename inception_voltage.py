@@ -20,6 +20,9 @@ p.add_argument('-refine_steps', type=int, default=0,
                help='Refine for this number of steps')
 p.add_argument('-n_runs', type=int, default=10,
                help='Use this number of runs per start location')
+p.add_argument('-settings', type=str, nargs='+',
+               help=r'Other settings, e.g. "gas%%pressure=1.0" ' +
+               r'"photoi%%enabled=T"')
 p.add_argument('-verbosity', type=int, default=0,
                help='How much information to print')
 args = p.parse_args()
@@ -36,6 +39,9 @@ def target_function(factor):
         r'-avalanche%n_runs=' + f'{args.n_runs}',
         r'-input%field_scale_factor=' + f'{factor}'
     ]
+
+    if args.settings is not None:
+        other_args += ['-' + arg for arg in args.settings]
 
     proc = subprocess.run([pdsim_executable] + args.cfgs + other_args,
                           capture_output=True, check=True)
@@ -119,7 +125,8 @@ for factor in factors:
         break
 
 if val_lo is None or val_hi is None:
-    raise ValueError('The range fbound does not include a sign change')
+    raise ValueError(f'The range fbound {args.fbound} does not lead to '
+                     'a sign change')
 
 bracket, values = noisy_bisect(target_function, factor_lo, factor_hi,
                                val_lo, val_hi, 1e-3, args.verbosity)
