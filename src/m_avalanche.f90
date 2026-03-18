@@ -81,7 +81,7 @@ contains
     integer                        :: inception_count
     integer(int64)                 :: n_steps_total, n_steps_point
     real(dp)                       :: inception_size
-    real(dp)                       :: p_avg, pvar_avg, volume
+    real(dp)                       :: p_avg, pvar_avg, p_max, volume
     real(dp)                       :: r_min(3), r_max(3)
     logical                        :: trace_photons, use_antithetic
     logical                        :: limit_photoelectrons
@@ -180,6 +180,8 @@ contains
     !$omp end parallel
     call system_clock(t_end, count_rate)
 
+    p_max = maxval(pdsim_ug%point_data(:, i_inception_prob))
+
     call pdsim_pointdata_average(pdsim_ug, i_inception_prob, &
          pdsim_axisymmetric, 1, p_avg, volume)
     call pdsim_pointdata_average(pdsim_ug, i_inception_pvar, &
@@ -193,13 +195,14 @@ contains
        end if
 
        write(*, "(A,E12.4)") " Average inception probability: ", p_avg
+       write(*, "(A,E12.4)") " Maximum inception probability: ", p_max
        write(*, "(A,E12.4)") " Standard deviation bound:      ", sqrt(pvar_avg)
        write(*, "(A,E12.4)") " Total volume of gas:           ", volume
        write(*, "(A,I0)")    " Total number of steps taken:     ", n_steps_total
        write(*, "(A,E12.4)") " Time for avalanches (s):       ", &
             (t_end - t_start)/real(count_rate, dp)
     else
-       write(*, "(3E12.4)") p_avg, sqrt(pvar_avg), volume
+       write(*, "(4E12.4)") p_avg, sqrt(pvar_avg), volume, p_max
     end if
 
   end subroutine avalanche_simulate
