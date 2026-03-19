@@ -140,7 +140,7 @@ if val_lo is None or val_hi is None:
 
 bracket, _ = noisy_bisect(target_function, factor_lo, factor_hi,
                           val_lo, val_hi,
-                          args.bisect_tolerance * (factor_hi - factor_lo),
+                          args.bisect_tolerance * abs(factor_hi - factor_lo),
                           args.verbosity)
 
 factor_estimate = 0.5 * sum(bracket)
