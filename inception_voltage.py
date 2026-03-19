@@ -152,5 +152,5 @@ if args.verbosity > 0:
 print(f'{factor_estimate:.4e} {err:.1e}')
 
 if args.show_pmax:
-    p, p_max = target_function(factor_estimatein)
+    p, p_max = target_function(factor_estimate)
     print(f'p_max: {p_max:.4f}')
