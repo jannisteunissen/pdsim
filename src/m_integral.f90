@@ -48,7 +48,7 @@ contains
     integer                    :: boundary_material
     real(dp)                   :: min_dx, max_dx, boundary_distance
     real(dp)                   :: move_distance
-    real(dp)                   :: rtol, atol, r(3), w
+    real(dp)                   :: rtol, atol, r(3)
     real(dp)                   :: field(pdsim_ndim), td(pdsim_ncols)
     real(dp)                   :: r_final(3), p_m1, sum_ioniz, t_final
     real(dp), allocatable      :: y(:, :), y_field(:, :)
@@ -97,7 +97,7 @@ contains
     call system_clock(t_start, count_rate)
 
     !$omp parallel do private(r, y, y_field, n_steps, field, td, &
-    !$omp w, reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material) &
+    !$omp reverse, sum_ioniz, p_m1, r_final, t_final, boundary_material) &
     !$omp schedule(dynamic)
     do n = 1, pdsim_ug%n_points
 
@@ -143,7 +143,7 @@ contains
 
        ! Compute integrals along path
        call compute_path_integrals(pdsim_ndim, nvar, n_steps, y(:, 1:n_steps), &
-            y_field(:, 1:n_steps), w, sum_ioniz, p_m1, &
+            y_field(:, 1:n_steps), sum_ioniz, p_m1, &
             r_final(1:pdsim_ndim), t_final)
 
        pdsim_ug%point_data(n, i_k_integral) = maxval(y(pdsim_ndim+i_Kint, 1:n_steps))
@@ -160,8 +160,6 @@ contains
        pdsim_ug%point_data(n, i_eta) = td(pdsim_col_eta)
        pdsim_ug%point_data(n, i_alpha_eff) = td(pdsim_col_alpha) - td(pdsim_col_eta)
 
-       ! pdsim_ug%point_data(n, i_w) = w
-       ! pdsim_ug%point_data(n, i_p0) = 1 - exp(y(pdsim_ndim+i_Kint, n_steps))/w
        pdsim_ug%point_data(n, i_p_m1) = p_m1
        pdsim_ug%point_data(n, i_kstar) = log(1 + sum_ioniz)
 
@@ -297,17 +295,13 @@ contains
   end subroutine ion_sub
 
   !> Compute several integrals along the electric field streamline
-  subroutine compute_path_integrals(ndim, nvar, n_steps, y, y_field, w, &
+  subroutine compute_path_integrals(ndim, nvar, n_steps, y, y_field, &
        sum_ioniz, p_m1, r_av, t_av)
     integer, intent(in)   :: ndim
     integer, intent(in)   :: nvar
     integer, intent(in)   :: n_steps
     real(dp), intent(in)  :: y(ndim+nvar, n_steps)
     real(dp), intent(in)  :: y_field(ndim, n_steps)
-    !> The w value at the final point, as defined in Kendall's 1948 paper:
-    !> w = 1 + exp(-rho(x)) * integral(exp(rho(x')) * alpha(x') dx')
-    !> for x' between 0 and x. Here rho(x) = -K(x).
-    real(dp), intent(out) :: w
     !> The total number of ionizations given by integral(exp(-rho(x')) *
     !> alpha(x') dx')
     real(dp), intent(out) :: sum_ioniz
@@ -336,15 +330,12 @@ contains
     end do
 
     ! Evaluate integrals
-    w = 0.0_dp
     p_m1 = 0.0_dp
     tmp_sum(1) = 0.0_dp
 
     do n = 1, n_steps-1
        dx = norm2(y(1:ndim, n+1) - y(1:ndim, n))
 
-       w = w + approx_exp_integral(-y(ndim+i_Kint, n), &
-            -y(ndim+i_Kint, n+1), f1(n), f1(n+1), dx)
        tmp_sum(n+1) = tmp_sum(n) + approx_exp_integral(y(ndim+i_Kint, n), &
             y(ndim+i_Kint, n+1), f1(n), f1(n+1), dx)
        p_m1 = p_m1 + approx_exp_integral(-y(ndim+i_Lint, n), &
@@ -373,7 +364,6 @@ contains
        t_av = y(ndim+i_travel_time, 1)
     end if
 
-    w = 1 + exp(y(ndim+i_Kint, n_steps)) * w
     p_m1 = exp(-y(ndim+i_Lint, n_steps)) + p_m1
 
   contains
