@@ -130,9 +130,12 @@ contains
 
        ! Trace electron avalanche
        reverse = .true.
-       call iu_integrate_along_field(pdsim_ug, pdsim_ndim, electron_sub, &
-            r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
-            min_dx, max_dx, max_steps, rtol, atol, reverse, nvar, y, y_field, &
+       y(1:pdsim_ndim, 1) = r(1:pdsim_ndim)
+       y(pdsim_ndim+1:, 1) = 0.0_dp
+
+       call iu_integrate_along_field(pdsim_ug, pdsim_ndim, nvar, electron_sub, &
+            pdsim_pdata_field(1:pdsim_ndim), &
+            min_dx, max_dx, max_steps, rtol, atol, reverse, y, y_field, &
             n_steps, pdsim_axisymmetric, &
             pdsim_icdata_material, pdsim_gas_material_value)
 
@@ -166,9 +169,12 @@ contains
 
        ! Trace positive ions
        reverse = .false.
-       call iu_integrate_along_field(pdsim_ug, pdsim_ndim, ion_sub, &
-            r(1:pdsim_ndim), pdsim_pdata_field(1:pdsim_ndim), &
-            min_dx, max_dx, max_steps, rtol, atol, reverse, nvar, y, y_field, &
+       y(1:pdsim_ndim, 1) = r(1:pdsim_ndim)
+       y(pdsim_ndim+1:, 1) = 0.0_dp
+
+       call iu_integrate_along_field(pdsim_ug, pdsim_ndim, nvar, ion_sub, &
+            pdsim_pdata_field(1:pdsim_ndim), &
+            min_dx, max_dx, max_steps, rtol, atol, reverse, y, y_field, &
             n_steps, pdsim_axisymmetric, &
             pdsim_icdata_material, pdsim_gas_material_value, boundary_material)
 
@@ -259,40 +265,40 @@ contains
   end subroutine move_mesh_points_slightly
 
   !> Helper routine for integration along field lines
-  subroutine electron_sub(ndim, r, field, nvar, integrand)
+  subroutine electron_sub(ndim, nvar, field, y, dy_var)
     integer, intent(in)   :: ndim
-    real(dp), intent(in)  :: r(ndim)
-    real(dp), intent(in)  :: field(ndim)
     integer, intent(in)   :: nvar
-    real(dp), intent(out) :: integrand(nvar)
+    real(dp), intent(in)  :: field(ndim)
+    real(dp), intent(in)  :: y(ndim+nvar)
+    real(dp), intent(out) :: dy_var(nvar)
     real(dp)              :: field_norm, td(pdsim_ncols)
 
     field_norm = norm2(field)
     td = LT_get_mcol(pdsim_tdtbl, field_norm)
 
     ! 1/velocity
-    integrand(i_travel_time) = 1/(field_norm * td(pdsim_col_mu))
+    dy_var(i_travel_time) = 1/(field_norm * td(pdsim_col_mu))
     ! alpha - eta
-    integrand(i_Kint) = td(pdsim_col_alpha) - td(pdsim_col_eta)
+    dy_var(i_Kint) = td(pdsim_col_alpha) - td(pdsim_col_eta)
     ! alpha + eta
-    integrand(i_Lint) = td(pdsim_col_alpha) + td(pdsim_col_eta)
+    dy_var(i_Lint) = td(pdsim_col_alpha) + td(pdsim_col_eta)
 
-    integrand(4:nvar) = 0.0_dp
+    dy_var(4:nvar) = 0.0_dp
   end subroutine electron_sub
 
   !> Helper routine for integration along field lines
-  subroutine ion_sub(ndim, r, field, nvar, integrand)
+  subroutine ion_sub(ndim, nvar, field, y, dy_var)
     integer, intent(in)   :: ndim
-    real(dp), intent(in)  :: r(ndim)
-    real(dp), intent(in)  :: field(ndim)
     integer, intent(in)   :: nvar
-    real(dp), intent(out) :: integrand(nvar)
+    real(dp), intent(in)  :: field(ndim)
+    real(dp), intent(in)  :: y(ndim+nvar)
+    real(dp), intent(out) :: dy_var(nvar)
     real(dp)              :: field_norm
 
     field_norm = norm2(field)
     ! 1/velocity
-    integrand(i_travel_time) = 1/(field_norm * pdsim_ion_mobility)
-    integrand(2:nvar) = 0.0_dp
+    dy_var(i_travel_time) = 1/(field_norm * pdsim_ion_mobility)
+    dy_var(2:nvar) = 0.0_dp
   end subroutine ion_sub
 
   !> Compute several integrals along the electric field streamline
