@@ -9,6 +9,8 @@ module m_integral
   implicit none
   private
 
+  ! Maximum number of variables to be integrated
+  integer, parameter :: nvar = 3
   ! Index for storing travel time
   integer, parameter :: i_travel_time = 1
   ! Index for storing integral of alpha - eta
@@ -55,7 +57,6 @@ contains
     real(dp), allocatable      :: moved_points(:, :)
     logical, allocatable       :: mask(:)
     logical                    :: reverse
-    integer, parameter         :: nvar = 3
     integer(int64)             :: t_start, t_end, count_rate
 
     call CFG_get(cfg, "integral%max_steps", max_steps)
