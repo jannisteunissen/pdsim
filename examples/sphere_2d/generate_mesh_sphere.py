@@ -89,7 +89,7 @@ def solve_field_fem(args):
     # Save output in P1 basis
     basis1 = basis.with_element(ElementTriP1())
 
-    m_out = to_meshio(mesh)
+    m_out = to_meshio(mesh, encode_cell_data=False)
     m_out.point_data["potential"] = basis1.project(basis.interpolate(u))
     m_out.point_data["E_r"] = basis1.project(-basis.interpolate(u).grad[0])
     m_out.point_data["E_z"] = basis1.project(-basis.interpolate(u).grad[1])
