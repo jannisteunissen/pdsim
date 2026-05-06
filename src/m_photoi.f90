@@ -128,7 +128,7 @@ contains
     real(dp), intent(inout)    :: absorption_locations(:, :)
 
     integer  :: n, n_photons_max
-    real(dp) :: num_mean, en_frac, r, lambda, p_no_ionization, u01
+    real(dp) :: num_mean, en_frac, r, lambda, p_ionization, u01
 
     num_mean  = pi_efficiency * pi_quench_fac * num_ionizations
     n_photons_max = min(rng%poisson(num_mean), max_photons)
@@ -149,8 +149,8 @@ contains
 
        ! Check if photon was absorbed without ionization
        if (pi_k3 > 0) then
-          p_no_ionization = exp(-pi_k3 * r)
-          if (rng%unif_01() > p_no_ionization) cycle
+          p_ionization = exp(-pi_k3 * r)
+          if (rng%unif_01() > p_ionization) cycle
        end if
 
        n_photons = n_photons + 1
