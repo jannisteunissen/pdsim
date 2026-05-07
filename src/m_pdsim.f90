@@ -139,6 +139,7 @@ contains
   subroutine pdsim_create_config(cfg)
     type(CFG_t), intent(inout) :: cfg
     real(dp)                   :: dummy_real(0)
+    character(len=20)          :: dummy_string(0)
 
     call CFG_add(cfg, "input%mesh", undefined_str, &
          "Input mesh file in (.binda format)", required=.true.)
@@ -151,8 +152,9 @@ contains
     call CFG_add(cfg, "input%field_component_names", [undefined_str], &
          "Names of the electric field components stored as point data", &
          dynamic_size=.true., required=.true.)
-    call CFG_add(cfg, "input%potential_name", undefined_str, &
-         "Optional: name of electric potential, scaled by field_scale_factor")
+    call CFG_add(cfg, "input%point_data_scaled_by_field", dummy_string, &
+         "Optional: name(s) of point data scaled by field_scale_factor", &
+         dynamic_size=.true.)
     call CFG_add(cfg, "input%material_name", undefined_str, &
          "Variable describing the material (point or cell data), or NONE", &
          required=.true.)
@@ -206,9 +208,9 @@ contains
     ! Mesh related parameters
     character(len=200)              :: mesh_file
     real(dp)                        :: r_scale_factor, E_scale_factor
-    character(len=120)              :: material_name, potential_name
-    character(len=120), allocatable :: field_component_names(:)
-    integer                         :: n_field_comp, i_potential
+    character(len=120)              :: material_name
+    character(len=120), allocatable :: field_component_names(:), names(:)
+    integer                         :: n_field_comp, i_point_data
 
     call CFG_get(cfg, "output%name", pdsim_output_name)
     call CFG_get(cfg, "output%verbosity", pdsim_verbosity)
@@ -226,7 +228,6 @@ contains
     pdsim_ndim = iu_ndim_cell_type(pdsim_ug%cell_type)
 
     call CFG_get(cfg, "input%material_name", material_name)
-    call CFG_get(cfg, "input%potential_name", potential_name)
     call CFG_get(cfg, "input%lookup_table_size", pdsim_table_size)
 
     call store_material_data(pdsim_ug, trim(material_name), &
@@ -267,11 +268,17 @@ contains
        pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp)) = E_scale_factor * &
             pdsim_ug%point_data(:, pdsim_pdata_field(1:n_field_comp))
 
-       if (potential_name /= undefined_str) then
-          call iu_get_point_data_index(pdsim_ug, trim(potential_name), i_potential)
-          pdsim_ug%point_data(:, i_potential) = E_scale_factor * &
-               pdsim_ug%point_data(:, i_potential)
-       end if
+       ! Scale additional electrostatic data (e.g., potential, E_norm) so it
+       ! looks consistent in the output
+       call CFG_get_size(cfg, "input%point_data_scaled_by_field", n)
+       allocate(names(n))
+       call CFG_get(cfg, "input%point_data_scaled_by_field", names)
+
+       do i = 1, n
+          call iu_get_point_data_index(pdsim_ug, trim(names(i)), i_point_data)
+          pdsim_ug%point_data(:, i_point_data) = E_scale_factor * &
+               pdsim_ug%point_data(:, i_point_data)
+       end do
     end if
 
     call CFG_get(cfg, "input%axisymmetric", pdsim_axisymmetric)
