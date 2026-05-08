@@ -22,6 +22,11 @@ To be able to run the Python examples that include mesh generation and field com
     pip install gmsh
     pip install scikit-fem[all]
 
+Different software can be used to visualize `pdsim` results, which are written in the VTK unstructured (`.vtu.`) format, for example:
+
+* [Visit](https://visit-dav.github.io/visit-website/)
+* [Paraview](https://www.paraview.org/)
+
 ### Getting the code
 
     git clone --recurse-submodules https://github.com/jannisteunissen/pdsim.git
