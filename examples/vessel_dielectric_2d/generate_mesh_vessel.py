@@ -10,6 +10,7 @@ from skfem import Basis, BilinearForm, solve, condense
 from skfem import ElementTriP0, ElementTriP1, ElementTriP3
 from skfem.io.meshio import from_meshio, to_meshio
 from skfem.helpers import dot, grad
+import os
 import meshio
 import argparse
 
@@ -142,10 +143,11 @@ def create_vessel_mesh(args):
         ellips_axis = geo.addLine(ellips_bot, ellips_top)
         l_ellips = [ellips_mid_top, -ellips_axis, ellips_bot_mid]
 
-        # Axis line (counter-clockwise)
+        # On-axis line but around ellipsoid
         l_axis_disc1_disc2 = [
             geo.addLine(p_axis_disc2_bottom, ellips_top),
-            -ellips_axis,
+            ellips_mid_top,
+            ellips_bot_mid,
             geo.addLine(ellips_bot, p_axis_disc1_top),
         ]
 
@@ -157,32 +159,48 @@ def create_vessel_mesh(args):
         ]
         cl_ellips = None
 
-    # Outer boundary loop, counter-clockwise
-    cl_outer = geo.addCurveLoop([
-        l_outer_bottom,
-        -l_top_rod2_outer,
-        -l_rod2_side,
-        -l_disc2_to_rod2,
-        a_disc2_tr_mid,
-        a_disc2_mid_br,
-        -l_disc2_axis_br,
-        *l_axis_disc1_disc2,
-        -l_disc1_tr_axis,
-        -a_disc1_mid_tr,
-        -a_disc1_br_mid,
-        -l_rod1_to_disc1,
-        -l_rod1_side,
-        l_bottom_rod1_outer
-    ])
-
     if args.use_ellipsoid:
-        s_gas = geo.addPlaneSurface([cl_outer, cl_ellips])
+        # Gas boundary loop, counter-clockwise
+        cl_gas = geo.addCurveLoop([
+            l_outer_bottom,
+            -l_top_rod2_outer,
+            -l_rod2_side,
+            -l_disc2_to_rod2,
+            a_disc2_tr_mid,
+            a_disc2_mid_br,
+            -l_disc2_axis_br,
+            geo.addLine(p_axis_disc2_bottom, ellips_top),
+            -ellips_mid_top,
+            -ellips_bot_mid,
+            geo.addLine(ellips_bot, p_axis_disc1_top),
+            -l_disc1_tr_axis,
+            -a_disc1_mid_tr,
+            -a_disc1_br_mid,
+            -l_rod1_to_disc1,
+            -l_rod1_side,
+            l_bottom_rod1_outer
+        ])
+        s_gas = geo.addPlaneSurface([cl_gas])
         s_ellips = geo.addPlaneSurface([cl_ellips])
-        model.addPhysicalGroup(2, [s_ellips], name="ellipsoid")
     else:
-        s_gas = geo.addPlaneSurface([cl_outer])
-
-    geo.synchronize()
+        # Gas boundary loop, counter-clockwise
+        cl_gas = geo.addCurveLoop([
+            l_outer_bottom,
+            -l_top_rod2_outer,
+            -l_rod2_side,
+            -l_disc2_to_rod2,
+            a_disc2_tr_mid,
+            a_disc2_mid_br,
+            -l_disc2_axis_br,
+            *l_axis_disc1_disc2,
+            -l_disc1_tr_axis,
+            -a_disc1_mid_tr,
+            -a_disc1_br_mid,
+            -l_rod1_to_disc1,
+            -l_rod1_side,
+            l_bottom_rod1_outer
+        ])
+        s_gas = geo.addPlaneSurface([cl_gas])
 
     # --------------------------------------------------------------------
     # PHYSICAL GROUPS
@@ -209,12 +227,17 @@ def create_vessel_mesh(args):
     domain_bottom_lines = [l_bottom_rod1_outer]
     domain_side_lines = [l_outer_bottom]
 
+    geo.synchronize()
+
     model.addPhysicalGroup(1, bottom_electrode_lines, name="bottom_electrode")
     model.addPhysicalGroup(1, top_electrode_lines, name="top_electrode")
     model.addPhysicalGroup(1, domain_top_lines, name="domain_top")
     model.addPhysicalGroup(1, domain_bottom_lines, name="domain_bottom")
     model.addPhysicalGroup(1, domain_side_lines, name="domain_side")
     model.addPhysicalGroup(2, [s_gas], name="gas")
+
+    if args.use_ellipsoid:
+        model.addPhysicalGroup(2, [s_ellips], name="ellipsoid")
 
     # --------------------------------------------------------------------
     # MESH
