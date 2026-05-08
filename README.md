@@ -13,7 +13,14 @@ This tool can be used to simulate the inception of partial discharges in a given
 
 Compilation requires a recent Fortran compiler, such as `gfortran`. If another compiler is used, the `Makefile` might have to be edited.
 
-To convert unstructured mesh data, the [meshio](https://github.com/nschloe/meshio) library is required, which can be installed using for example `pip` as `pip install meshio[all]`.
+To convert unstructured mesh data, the [meshio](https://github.com/nschloe/meshio) library is required, which can be installed using for example `pip` as 
+
+    pip install meshio[all]
+
+To be able to run the Python examples that include mesh generation and field computation, [gmsh](https://gmsh.info/) and [scikit-fem](https://scikit-fem.readthedocs.io/en/latest/) are required, which can be installed with
+
+    pip install gmsh
+    pip install scikit-fem[all]
 
 ### Getting the code
 
