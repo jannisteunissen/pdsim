@@ -9,18 +9,24 @@ This tool can be used to simulate the inception of partial discharges in a given
 
 ## Installation
 
+### Requirements
+
 Compilation requires a recent Fortran compiler, such as `gfortran`. If another compiler is used, the `Makefile` might have to be edited.
 
-Step 1: Download the source code:
+To convert unstructured mesh data, the [meshio](https://github.com/nschloe/meshio) library is required, which can be installed using for example `pip` as `pip install meshio[all]`.
+
+### Getting the code
 
     git clone --recurse-submodules https://github.com/jannisteunissen/pdsim.git
 
-Step 2: compile the two libraries that are required:
+### Compilation
+
+First compile the two libraries that are required:
 
     make -C particle_core
     make -C interpolate_unstructured
 
-Step 3: compile the main program `pdsim`:
+Then compile the main program `pdsim`:
 
     make
 
