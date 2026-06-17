@@ -10,7 +10,6 @@ from skfem import Basis, BilinearForm, solve, condense
 from skfem import ElementTriP0, ElementTriP1, ElementTriP3
 from skfem.io.meshio import from_meshio, to_meshio
 from skfem.helpers import dot, grad
-import os
 import meshio
 import argparse
 
@@ -32,6 +31,11 @@ def create_vessel_mesh(args):
     disc2_r = args.disc2_r
     disc2_h = args.disc2_h
 
+    if disc1_r - 0.5 * disc1_h - rod1_r < 0:
+        raise ValueError("disc1_r is smaller than supported")
+    if disc2_r - 0.5 * disc2_h - rod2_r < 0:
+        raise ValueError("disc2_r is smaller than supported")
+
     # --------------------------------------------------------------------
     # POINTS
     # --------------------------------------------------------------------
@@ -49,22 +53,21 @@ def create_vessel_mesh(args):
     p_rod1_bottom = geo.addPoint(rod1_r, 0.0, 0.0, args.lc_rod)
     p_rod1_top = geo.addPoint(rod1_r, rod1_h, 0.0, args.lc_rod)
 
-    # Bottom disc (semi‑circle side), attached at z = rod1_h to rod1
+    # Bottom disc (semi-circle side), attached at z = rod1_h to rod1
     r_c1 = disc1_r - 0.5 * disc1_h
     z_c1 = rod1_h + 0.5 * disc1_h
 
-    # Points on the semi‑circle
-    # bottom‑right of the semi‑circle (z = rod1_h)
+    # Points on the semi-circle
+    # bottom-right of the semi-circle (z = rod1_h)
     p_disc1_br = geo.addPoint(r_c1, rod1_h, 0.0, args.lc_disc)
-    # rightmost point of semi‑circle (r = disc1_r, z = z_c1)
+    # rightmost point of semi-circle (r = disc1_r, z = z_c1)
     p_disc1_mid = geo.addPoint(disc1_r, z_c1, 0.0, args.lc_disc)
-    # top‑right of the semi‑circle (z = rod1_h + disc1_h)
+    # top-right of the semi-circle (z = rod1_h + disc1_h)
     p_disc1_tr = geo.addPoint(r_c1, rod1_h + disc1_h, 0.0, args.lc_disc)
 
     # top axis intersection for disc1
     p_disc1_axis_top = p_axis_disc1_top  # same as defined above
 
-    # Top rod and disc (mirrored near the top)
     # Top rod vertical extent: [vessel_h - rod2_h, vessel_h]
     p_rod2_bottom = geo.addPoint(rod2_r, vessel_h - rod2_h, 0.0, args.lc_rod)
     p_rod2_top = geo.addPoint(rod2_r, vessel_h, 0.0, args.lc_rod)
@@ -75,7 +78,7 @@ def create_vessel_mesh(args):
     r_c2 = disc2_r - 0.5 * disc2_h
     z_c2 = z_disc2_bottom + 0.5 * disc2_h
 
-    # Points on the semi‑circle of the top disc
+    # Points on the semi-circle of the top disc
     p_disc2_tr = geo.addPoint(r_c2, z_disc2_top, 0.0, args.lc_disc)
     p_disc2_mid = geo.addPoint(disc2_r, z_c2, 0.0, args.lc_disc)
     p_disc2_br = geo.addPoint(r_c2, z_disc2_bottom, 0.0, args.lc_disc)
@@ -99,10 +102,10 @@ def create_vessel_mesh(args):
     # Bottom rod (electrode) vertical side
     l_rod1_side = geo.addLine(p_rod1_bottom, p_rod1_top)
 
-    # Connection from rod1 top to disc1 bottom‑right point
+    # Connection from rod1 top to disc1 bottom-right point
     l_rod1_to_disc1 = geo.addLine(p_rod1_top, p_disc1_br)
 
-    # Bottom disc semi‑circle arcs
+    # Bottom disc semi-circle arcs
     p_disc1_center = geo.addPoint(r_c1, z_c1, 0.0, args.lc_disc)
     a_disc1_br_mid = geo.addCircleArc(p_disc1_br, p_disc1_center, p_disc1_mid)
     a_disc1_mid_tr = geo.addCircleArc(p_disc1_mid, p_disc1_center, p_disc1_tr)
@@ -113,10 +116,10 @@ def create_vessel_mesh(args):
     # Top rod (electrode) vertical side
     l_rod2_side = geo.addLine(p_rod2_bottom, p_rod2_top)
 
-    # Connection from disc2 top‑right to rod2 bottom
+    # Connection from disc2 top-right to rod2 bottom
     l_disc2_to_rod2 = geo.addLine(p_disc2_tr, p_rod2_bottom)
 
-    # Top disc semi‑circle arcs
+    # Top disc semi-circle arcs
     p_disc2_center = geo.addPoint(r_c2, z_c2, 0.0, args.lc_disc)
     a_disc2_tr_mid = geo.addCircleArc(p_disc2_tr, p_disc2_center, p_disc2_mid)
     a_disc2_mid_br = geo.addCircleArc(p_disc2_mid, p_disc2_center, p_disc2_br)
