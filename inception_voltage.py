@@ -43,7 +43,7 @@ def target_function(factor):
     this_folder = pathlib.Path(__file__).parent.resolve()
     pdsim_executable = os.path.join(this_folder, 'pdsim')
 
-    env = {}
+    env = os.environ.copy()
 
     other_args = [
         r'-output%verbosity=0',
@@ -75,7 +75,8 @@ def target_function(factor):
                          f"  Stderr:\n{e.stderr}\n")
         raise
 
-    p_avg, stddev, volume, p_max = map(float, proc.stdout.split())
+    last_line = proc.stdout.strip().splitlines()[-1]
+    p_avg, stddev, volume, p_max = map(float, last_line.split())
 
     if args.p_nonzero:
         p_max = 1 if p_avg > 0 else 0
@@ -144,7 +145,7 @@ bracket, _ = noisy_bisect(target_function, factor_lo, factor_hi,
                           args.verbosity)
 
 factor_estimate = 0.5 * sum(bracket)
-err = 0.5 * (bracket[1] - bracket[0])
+err = 0.5 * abs(bracket[1] - bracket[0])
 
 if args.verbosity > 0:
     print('factor     error')
