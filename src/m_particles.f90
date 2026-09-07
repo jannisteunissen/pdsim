@@ -84,7 +84,7 @@ contains
     pc%accel_function => accel_function
     pc%outside_check => outside_check
 
-    call pc%initialize(UC_elec_mass, 100*int(num_electrons_inception))
+    call pc%initialize(UC_elec_mass, 2*int(num_electrons_inception) + 100000)
     call pc%use_cross_secs(max_energy, pdsim_table_size, cross_secs)
 
     where (pc%colls(:)%type == CS_ionize_t)
